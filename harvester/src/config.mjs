@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { log } from './log.mjs'
+import { loadEnvFile } from './secrets.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const ROOT = path.resolve(HERE, '..')
@@ -57,6 +58,14 @@ export function resolveTls(databaseUrl) {
 
 export async function loadConfig(options = {}) {
   const requireDatabase = options.requireDatabase ?? true
+
+  // 先把本地凭据文件（harvester/.env.local）载入环境变量。
+  // 已存在的环境变量优先——systemd / CI 注入的值不会被文件里的旧值覆盖。
+  const secrets = await loadEnvFile()
+  if (secrets.exists) {
+    log.info('已加载本地凭据文件', { file: secrets.path, keys: secrets.loaded })
+  }
+
   const [sources, categories] = await Promise.all([
     readJson('config/sources.json'),
     readJson('config/categories.json'),
@@ -99,11 +108,27 @@ export async function loadConfig(options = {}) {
     ossPublicBaseUrl: process.env.OSS_PUBLIC_BASE_URL ?? '',
     indexBaseUrl: process.env.HARVESTER_INDEX_BASE_URL ?? 'https://dsh-plugin-repo.pages.dev',
 
+    // nginx 静态托管（阿里云 ECS + 已有 nginx）
+    // nginxRoot：nginx 的 root 目录（发现器与 nginx 同机时直接写这里）
+    nginxRoot: process.env.HARVESTER_NGINX_ROOT ?? '',
+    // rsyncTarget：user@host:/path —— 发现器不在 ECS 上时，发布后同步过去
+    rsyncTarget: process.env.HARVESTER_NGINX_RSYNC_TARGET ?? '',
+    rsyncBin: process.env.HARVESTER_NGINX_RSYNC_BIN ?? 'rsync',
+    // probeUrl：发布后回源自检的公开地址（https://<域名>）
+    nginxProbeUrl: process.env.HARVESTER_NGINX_PROBE_URL ?? '',
+    nginxProbeAttempts: num(process.env.HARVESTER_NGINX_PROBE_ATTEMPTS, 3),
+    nginxProbeDelayMs: num(process.env.HARVESTER_NGINX_PROBE_DELAY_MS, 1500),
+
     // 行为开关
     dryRun: false,
     sources,
     categories,
   }
+
+  // 凭据来源信息（只记路径与键名，不记值）
+  config.secretsFile = secrets.path
+  config.secretsFileExists = secrets.exists
+  config.secretsLoaded = secrets.loaded
 
   // 允许入库的分类白名单：契约的 23 个内置分类 + 显式增补的
   config.knownCategories = [...(categories.known ?? []), ...(categories.extra ?? [])]

@@ -15,27 +15,42 @@
 cd harvester
 npm install
 
-# 联调：DATABASE_URL 必须带 TLS 参数
-export DATABASE_URL='postgres://dsh_plugin_harvester_rw:<口令>@47.101.216.5:5432/dsh_plugin_repo_dev?sslmode=no-verify'
-export GITHUB_TOKEN='<只读 PAT>'
+# ① 录入凭据（口令隐藏输入，落在 gitignored 的 .env.local；不经对话、不进 git）
+node src/cli.mjs set-secret
 
-# ① 不连库，先验证信源解析与索引渲染（不写任何数据）
+# ② 不连库，先验证信源解析与索引渲染（不写任何数据）
 node src/cli.mjs collect
 
-# ② 跑一轮完整流程（写库 + 发布）
+# ③ 跑一轮完整流程（写库 + 发布）
 node src/cli.mjs run
 
-# ③ 只从库重新渲染并发布
+# ④ 只从库重新渲染并发布
 node src/cli.mjs render
 
-# ④ 契约符合性检查（验收 T1）
+# ⑤ 契约符合性检查（验收 T1）
 node tools/contract-check.mjs
 
-# ⑤ 单测
+# ⑥ 单测
 node --test test/normalize.test.mjs test/sources-render.test.mjs
 ```
 
 > `node --test test/` 在 Windows 上对目录参数不友好，直接列文件名更稳。
+
+### 凭据从哪来
+
+`DATABASE_URL` / `GITHUB_TOKEN` 只有三个来源，优先级从高到低：
+
+| 来源 | 怎么来 | 适合谁 |
+| --- | --- | --- |
+| 进程环境变量 | systemd `EnvironmentFile`、CI 密钥、云效 Flow 变量 | 定时任务 |
+| `harvester/.env.local` | `node src/cli.mjs set-secret` 隐藏输入 | 本机手动跑 |
+| 管道 | `... \| node src/cli.mjs set-secret --stdin` | 密码管理器 / vault |
+
+`.env.local` 被 gitignore 忽略，POSIX 下权限 0600。它本质是「环境变量的持久化
+形式」——运行时由 `src/config.mjs` 自动载入，**已存在的环境变量永远赢**，所以
+systemd / CI 注入的值不会被文件里的旧值覆盖。
+
+口令绝不要贴进对话、issue 或提交记录。见第 9 节。
 
 ## 2. 目录
 
@@ -47,23 +62,26 @@ harvester/
 ├─ src/
 │  ├─ cli.mjs               命令行入口
 │  ├─ run.mjs               一轮流程编排（L4 核验 → 信源合并 → 候选池 → 渲染发布）
-│  ├─ config.mjs            环境变量与配置加载（含 sslmode → TLS 参数映射）
+│  ├─ config.mjs            环境变量与配置加载（含 sslmode → TLS 参数映射、凭据文件载入）
+│  ├─ secrets.mjs           本地凭据文件（.env.local）读写、连接串脱敏、隐藏输入
 │  ├─ log.mjs               结构化日志 + 凭据脱敏
 │  ├─ http.mjs              限流 / 退避重试 / 超时的 HTTP 客户端
 │  ├─ db.mjs                PG 连接、事务、契约表读写
 │  ├─ state.mjs             harvester_state 游标与摘要
 │  ├─ normalize.mjs         契约 id / install_spec / 分类 / 版本归一
-│  ├─ sources.mjs           信源解析器（markdown 清单、format-1 索引）
+│  ├─ sources.mjs           信源解析器（markdown 清单、format-1 索引、vbarter 注册表）
 │  ├─ collect.mjs           L1/L2/L3/L4 采集
 │  ├─ catalog.mjs           合并、入库门槛、事务 upsert、事件
 │  ├─ render-index.mjs      PG → format-1 index.json
 │  ├─ render-page.mjs       PG → 静态浏览页
-│  └─ publish.mjs           发布（本地目录 / 阿里云 OSS）
+│  └─ publish.mjs           发布（本地目录 / nginx / 阿里云 OSS）+ 发布守门
 ├─ tools/
 │  ├─ contract-check.mjs    契约符合性检查（只读）
 │  └─ probe-sources.mjs     信源格式探针（排障用）
 └─ test/                    单测
 ```
+
+> `.env.local` 是本地凭据文件（gitignored），仓库里没有模板——不要提交。
 
 ## 3. 契约要点与实现对照
 
@@ -158,28 +176,95 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
 每阶段的写操作独立事务；某阶段失败不影响已提交阶段。游标与摘要写在
 `harvester_state`（`cursor:*` / `source:<id>` / `last-run`），崩溃重启后续跑。
 
-## 6. 发布的两种 publisher 与发布守门
+## 6. 发布：三种 publisher 与发布守门
 
 ### publisher：产出物放哪
 
-发现器每轮产出两个文件：`index.json`（format-1 索引）与 `index.html`（静态浏览页）。
+发现器每轮产出两个文件：`index.json`（format-1 索引，约 3.2MB）与
+`index.html`（静态浏览页，约 2.8MB，样式与数据全内联，无外部资源）。
 publisher 决定把它们放到哪：
 
 | publisher | 行为 | 需要什么 |
 | --- | --- | --- |
 | `file`（默认） | 写到本地目录 `HARVESTER_OUT_DIR`（默认 `harvester/dist/`），**不上传任何东西** | 无 |
+| `nginx` | 原子替换到 nginx 的 root 目录；可选 rsync 推到 ECS；可选回源自检 | `HARVESTER_NGINX_ROOT` |
 | `oss` | 用可选依赖 `ali-oss` 直接传到阿里云 OSS | `OSS_BUCKET` / `OSS_REGION` / `OSS_PREFIX` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_PUBLIC_BASE_URL` |
 
-**为什么默认 `file`**：契约 §8 说发布到公网静态托管（首选 OSS，备选 GitHub Pages），
-但设计文档 §7.4 明确写着「静态页/index.json 发布渠道（待落实）」——渠道还没定，
-发现器不该替这个决策做主。`file` 不需要云凭据，cron / systemd / CI 任何环境都能跑；
+**为什么默认 `file`**：契约 §8 说发布到公网静态托管，但设计文档 §7.4 原本把
+渠道记作「待落实」。`file` 不需要云凭据，cron / systemd / CI 任何环境都能跑；
 产物就是一个标准静态目录，nginx root、rsync、GitHub Pages 工作流、OSS 同步、
-Cloudflare Pages 都能直接吃。等渠道定了再切 `oss` 只需改环境变量。
+Cloudflare Pages 都能直接吃。渠道定下来后切成 `nginx` 只改环境变量。
 
-> **一个容易踩的点**：`HARVESTER_INDEX_BASE_URL` 是 `index.json` **最终公开地址**。
-> 它有两个用途——format-1 里相对图标的解析基准，以及每轮发布前的
-> `parseMarketIndex` 自验基准。用 `file` publisher 时必须把它设成你实际部署的地址，
-> 否则自验是在错误的基准上做的。
+### publisher=nginx：阿里云 ECS + 已有 nginx + 已有域名
+
+这是本项目选定的发布渠道。三段式：
+
+```
+发现器 ──渲染──> index.json + index.html
+                     │
+                     ├─ ① 原子替换写入 nginx root 目录（发现器与 nginx 同机时）
+                     ├─ ② rsync 同步到 ECS（发现器不在 ECS 上时，可选）
+                     └─ ③ GET https://<域名>/index.json 回源自检（可选）
+```
+
+**① 原子替换是硬要求，不是优化。** nginx 直接对外提供这个 3.2MB 的
+`index.json`。如果用普通 `writeFile` 覆盖，下载方有概率拿到写了一半的 JSON，
+DSH「发现」页当场解析失败。实现是先写同目录临时文件再 `rename`——同一文件系统
+内 rename 是原子的，读者要么看到旧文件，要么看到完整的新文件，中间没有半截状态。
+`file` publisher 同样走这条路径。
+
+**② 两种部署形态**：
+
+| 形态 | 配置 |
+| --- | --- |
+| 发现器就跑在 ECS 上 | `HARVESTER_NGINX_ROOT=/var/www/dsh-plugin-repo`，直接写这个目录，不需要 rsync |
+| 发现器跑在别的机器 | 上面照配，再加 `HARVESTER_NGINX_RSYNC_TARGET=root@<ECS_IP>:/var/www/dsh-plugin-repo` |
+
+rsync 同步用 `--delete`，保证远端目录里没有上一轮残留的文件。rsync 不存在时
+会明确报错并提示改用 `publisher=file` + 外部同步，不会静默跳过。
+
+**③ 发布后回源自检**（`HARVESTER_NGINX_PROBE_URL=https://<域名>`）：
+发布完立刻 GET 公开地址的 `index.json`，确认 nginx 已经把新文件发出来了。
+这比「文件写成功」更接近用户实际看到的东西。失败只记警告，不影响本轮任务
+的成功判定（内容已经落盘，nginx 侧的问题不该让数据层跟着背锅）。
+
+### nginx 配置示例
+
+```nginx
+server {
+    listen 80;
+    server_name <你的域名>;
+
+    root /var/www/dsh-plugin-repo;
+    index index.html;
+
+    # 索引与浏览页是两个独立文件，各自设定缓存策略
+    location = /index.json {
+        default_type application/json;
+        add_header Cache-Control "public, max-age=300";
+        try_files $uri =404;
+    }
+
+    location = / {
+        add_header Cache-Control "public, max-age=300";
+        try_files /index.html =404;
+    }
+
+    # 不开放目录列表：web 根目录只应该暴露这两个文件
+    location / {
+        return 404;
+    }
+
+    # 3MB 的 JSON 和 2.8MB 的 HTML，gzip 后能小一个数量级
+    gzip on;
+    gzip_types application/json text/html text/css application/javascript;
+    gzip_min_length 1024;
+}
+```
+
+> nginx 默认的 `mime.types` 已经把 `.json` 映射成 `application/json`，
+> 上面的 `default_type` 只是显式写出来，方便后来人看懂。
+> HTTPS 建议用 certbot 或已有证书配置 `listen 443 ssl`。
 
 ### 发布守门：不让残缺索引覆盖完整索引
 
@@ -214,6 +299,7 @@ Cloudflare Pages 都能直接吃。等渠道定了再切 `oss` 只需改环境�
 | `DATABASE_URL` | —（必填，`collect` 除外） | PG 连接串，**必须带 TLS 参数** |
 | `GITHUB_TOKEN` / `GH_TOKEN` | 空 | 只读 PAT；匿名 60 次/小时不够 L4 用 |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | npm registry |
+| `HARVESTER_SECRETS_FILE` | `harvester/.env.local` | 本地凭据文件路径（gitignored） |
 | `HARVESTER_HTTP_TIMEOUT_MS` | `30000` | 单次请求超时 |
 | `HARVESTER_HTTP_RETRIES` | `3` | 退避重试次数 |
 | `HARVESTER_HTTP_CONCURRENCY` | `4` | 并发上限 |
@@ -224,8 +310,14 @@ Cloudflare Pages 都能直接吃。等渠道定了再切 `oss` 只需改环境�
 | `HARVESTER_OUT_DIR` | `harvester/dist` | `publisher=file` 的输出目录 |
 | `HARVESTER_BROWSE_LIMIT` | `5000` | 浏览页最多收录多少条（按共识票→star 排序取前 N；`0` = 不限）。完整目录在 PG 与 format-1 索引里 |
 | `HARVESTER_MAX_CATALOG_DROP` | `0.4` | 候选数相对上一轮的最大跌幅，超过就**跳过本轮发布**（见第 6 节） |
-| `HARVESTER_PUBLISHER` | `file` | `file` \| `oss` |
+| `HARVESTER_PUBLISHER` | `file` | `file` \| `nginx` \| `oss` |
 | `HARVESTER_INDEX_BASE_URL` | `https://dsh-plugin-repo.pages.dev` | 索引公开地址前缀（参与图标相对路径解析与自验） |
+| `HARVESTER_NGINX_ROOT` | —（`publisher=nginx` 时必填） | nginx 的 root 目录，如 `/var/www/dsh-plugin-repo` |
+| `HARVESTER_NGINX_RSYNC_TARGET` | 空 | `user@host:/path`；非空则发布后 rsync 同步到 ECS |
+| `HARVESTER_NGINX_RSYNC_BIN` | `rsync` | rsync 可执行文件路径 |
+| `HARVESTER_NGINX_PROBE_URL` | 空 | 发布后回源自检的公开地址，如 `https://<域名>` |
+| `HARVESTER_NGINX_PROBE_ATTEMPTS` | `3` | 回源自检重试次数 |
+| `HARVESTER_NGINX_PROBE_DELAY_MS` | `1500` | 回源自检重试间隔（按次数递增） |
 | `OSS_BUCKET` / `OSS_REGION` / `OSS_PREFIX` / `OSS_PUBLIC_BASE_URL` | — | `publisher=oss` 时必填 bucket/region |
 | `HARVESTER_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
 
@@ -242,11 +334,19 @@ Cloudflare Pages 都能直接吃。等渠道定了再切 `oss` 只需改环境�
 
 ## 9. 凭据纪律
 
-- `DATABASE_URL` / `GITHUB_TOKEN` 只从环境变量读，不落配置文件。
+- `DATABASE_URL` / `GITHUB_TOKEN` 只从环境变量或本地凭据文件读，不落配置文件、
+  不进 git、不进日志、不进导出物。
+- **口令不经对话**。需要录入时用 `node src/cli.mjs set-secret`（隐藏输入，
+  不回显、不进 shell history），或 `... | node src/cli.mjs set-secret --stdin`
+  从密码管理器管道过来。写进 `harvester/.env.local`——该文件被 gitignore
+  忽略，POSIX 下权限 0600。
+- `set-secret --status` 可以查看当前配置状态，连接串一律脱敏显示
+  （`postgres://user:***@host:5432/db`）。
 - 日志统一经 `src/log.mjs` 脱敏：URI 里的口令、名字里带 token/secret/password/
   authorization/cookie 的字段一律替换成 `***`。
 - 导出物（`index.json` / `index.html`）只含公共字段：不含 PG 内部字段、ratings、
-  本地数据、凭据与本机路径（契约 §4.5）。
+  本地数据、凭据与本机路径（契约 §4.5）。实测 `index.json` 中 `C:\`、
+  用户名、`DATABASE_URL` 出现次数均为 0。
 
 ## 10. 定时运行
 
@@ -261,6 +361,9 @@ WorkingDirectory=/opt/dsh-plugin-repo/harvester
 EnvironmentFile=/etc/dsh-harvester.env   # DATABASE_URL / GITHUB_TOKEN
 ExecStart=/usr/bin/node src/cli.mjs run
 ```
+
+也可以不用 `EnvironmentFile`，改为在机器上放一份 `/opt/dsh-plugin-repo/harvester/.env.local`
+（`chmod 600`，属主 `dsh`）——发现器启动时会自动载入它。
 
 ```ini
 # /etc/systemd/system/dsh-harvester.timer
@@ -285,36 +388,47 @@ CI 的环境变量/密钥管理。
 
 ### 已验证
 
-- **29 项单测通过**（`node --test test/normalize.test.mjs test/sources-render.test.mjs test/degradation.test.mjs`）：
-  归一化与契约 id、入库门槛、信源解析（markdown 清单 / 表格行 / format-1 索引）、
-  索引渲染与官方校验、失败降级规则。
-- **对 6 个真实信源跑通离线全链路**（`node src/cli.mjs collect`）：抓取 → 归一化 →
+- **55 项单测通过**（`node --test test/*.test.mjs`，逐个列文件名）：
+  归一化与契约 id、入库门槛、信源解析（markdown 清单 / 表格行 / format-1 索引 /
+  vbarter 注册表）、索引渲染与官方校验、失败降级规则、发布守门、
+  本地凭据文件（解析 / 优先级 / 写入 / 脱敏）、nginx 发布路径（原子替换 /
+  不留临时文件 / 未知 publisher 报错）。
+- **对 8 个真实信源跑通离线全链路**（`node src/cli.mjs collect`）：抓取 → 归一化 →
   门槛 → 渲染 → 官方 `parseMarketIndex` 自验 → 产出 `dist/index.json` + `dist/index.html`。
-  实测一轮：6 个信源全部成功、0 错误、6847 个去重候选、3484 条进索引，
+  实测一轮：8 个信源全部成功、0 错误、21863 个去重候选、3490 条进索引，
   索引内 npm 名 100% 合法且无重名，分类恰好落在契约的 23 个内置分类里。
 - **vbarter 两个源实测**：解析数与注册表自带 stats 完全一致
-  （curated 573 / discovered 20186 / published 20759），合并候选 21370。
+  （curated 573 / discovered 20186 / published 20759）。
 - **浏览页上限实测**：用真实 20759 条数据渲染，不限时 9.37 MB，
   上限 5000 时 2.27 MB（页面显示「5000 / 共 20759 个插件」）。
+- **导出物卫生实测**：`index.json` 里 `C:\`、本机用户名、`DATABASE_URL`
+  出现次数均为 0；`password`/`secret`/`token` 的命中全部在插件描述文本里。
+- **凭据录入端到端实测**：`set-secret --stdin` 写入 → 文件格式正确 →
+  `--status` 脱敏展示 → 运行时装载生效。
 - **PG 连通性与 TLS 路径**：47.101.216.5:5432 可达，`sslmode=no-verify` 的 TLS
   握手成功，服务端确认账号 `dsh_plugin_harvester_rw` 存在（返回
   `28P01 password authentication failed`）。
 
 ### 未验证（需口令 / 需决策）
 
-- **PG 写入路径未端到端跑通**：本机没有 `dsh_plugin_harvester_rw` 的口令
-  （交接说明三：口令走线下渠道，不在任何文档/聊天记录里）。失败点仅在口令。
-  拿到口令后按第 1 节跑 `run` + `tools/contract-check.mjs` 即可完成验收 T1。
+- **PG 写入路径未端到端跑通**：本机没有 `dsh_plugin_harvester_rw` 的口令。
+  口令现在有地方放了——`node src/cli.mjs set-secret`（隐藏输入，写进
+  gitignored 的 `.env.local`），**不要贴进对话**。拿到后按第 1 节跑
+  `run` + `tools/contract-check.mjs` 即可完成验收 T1。
+- **nginx 发布链路未连真实环境**：原子替换、目录写入、publisher 分发都有单测
+  覆盖，`publisher=file` 已跑通真实产出；但**没在真实 ECS + nginx 上验证过**
+  （需要 `HARVESTER_NGINX_ROOT`、域名、服务器访问权）。rsync 推送与回源自检
+  的代码路径同样只到单测级别。
 - **`vbarter-curated` / `vbarter-full` 已定位并接入**：源为
   `vbarter/dsh-plugin-registry` 的 `data/plugins.json`（站点 dshplugin.app），
-> 按 `source` 字段切成策展子集与全量自动发现两刀（见第 4 节）。
+  按 `source` 字段切成策展子集与全量自动发现两刀（见第 4 节）。
   唯一待确认的是契约 §3 的措辞「vbarter 全量自动发现」到底指
   `source=discovered`（本实现，判据：与 curated 互斥、避免同注册表重复计票）
   还是「策展+自动发现的合集」——若是后者，改 `config/sources.json` 里
   `vbarter-full` 的 `filter` 即可。
-- **静态托管渠道未实测**：`publisher=file` 已验证（产出 `dist/`）；
-  `publisher=oss` 的代码路径就绪但未连真实 OSS 跑过（需要 Bucket 与 AccessKey）。
+- **`publisher=oss` 未连真实 OSS**：代码路径就绪但没跑过（需要 Bucket 与 AccessKey）。
+  当前渠道已定为 ECS + nginx，oss 大概率用不上。
 - **L4 核验未连真实 GitHub 跑满批**：核验逻辑与事件判定有单测覆盖，
-  但未用真实 PAT 跑完整批量（需要 `GITHUB_TOKEN`）。
+  但未用真实 PAT 跑完整批量（需要 `GITHUB_TOKEN`，同样用 `set-secret` 录入）。
 - **端到端「发现页一键安装」由 Dennis 在本机完成**：本侧只保证 `index.json`
   通过 `parseMarketIndex`、PG 数据符合契约（交接说明末段）。

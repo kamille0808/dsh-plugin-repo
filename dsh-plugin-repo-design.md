@@ -342,7 +342,14 @@ UI 与工具同时展示两种分，客观分标注「自动计算，非安全�
 - **发现器运行位 = 他机常驻**（cron / systemd timer / 云效 Flow 定时流水线均可；因托管在 Codeup，GitHub Actions 不作为默认选项）。**GitHub 访问凭证 = PAT**（决策 2），置于他机环境变量。
 - **PG 公网可达**（决策 1），他机与本机直连均无阻。
 - **DDL 执行 = 用户/DBA**：本机只产出 SQL（`contract/migrations/0001_init.sql`），不接触 PG 管理账号。
-- **静态页/index.json 发布渠道（待落实）**：推荐阿里云 OSS 静态网站（与 Codeup 同生态），备选 GitHub Pages 或发现他机自带静态服务；需一个公网可达 URL 供官方「发现」页添加。
+- **静态页/index.json 发布渠道（2026-10-21 定）**：**阿里云 ECS + 已有 nginx + 已有域名**。
+  发现器把 format-1 索引与静态浏览页**原子替换**写入 nginx 的 root 目录；发现器不在
+  ECS 上时用 rsync 同步过去；发布后可回源自检 `https://<域名>/index.json`。
+  该 URL 即官方「发现 → 添加索引源」要填的地址。
+  实现见 `harvester/src/publish.mjs` 的 `publisher=nginx` 与 `harvester/README.md` 第 6 节
+  （含 nginx server 配置示例）。
+  注：契约 §8 原文写「首选阿里云 OSS 静态网站，备选 GitHub Pages」——那是**契约起草时**
+  的渠道假设；托管厂商属于发现器的实现细节，不在数据契约的接口范围内，故契约未改。
 - 发布渠道（npm / `github:` 安装）随仓库定（遗留事项 5）。
 - **发现器代码当前位置（2026-10-21 更新）**：按上条，理想形态是独立仓库（他机主写，
   含 `contract/`）。实际落地时发现器代码先放在**本仓库的 `harvester/` 目录**下——

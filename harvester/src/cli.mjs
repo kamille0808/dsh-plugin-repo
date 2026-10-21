@@ -8,6 +8,7 @@
  *   node src/cli.mjs verify-index [文件] 用官方 parseMarketIndex 校验索引
  *   node src/cli.mjs sources             列出信源名录并探测可达性
  *   node src/cli.mjs check-db            连库自检（契约版本 / 表结构 / 计数）
+ *   node src/cli.mjs set-secret          本地录入 DATABASE_URL / GITHUB_TOKEN（隐藏输入）
  */
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -20,6 +21,7 @@ import { renderMarketIndex } from './render-index.mjs'
 import { buildBrowseData, renderBrowsePage } from './render-page.mjs'
 import { publish } from './publish.mjs'
 import { fetchSource } from './collect.mjs'
+import { loadEnvFile, maskDatabaseUrl, promptSecret, secretFilePath, upsertEnvValue } from './secrets.mjs'
 
 const args = process.argv.slice(2)
 const command = args[0] ?? 'run'
@@ -47,9 +49,12 @@ try {
     case 'check-db':
       await cmdCheckDb()
       break
+    case 'set-secret':
+      await cmdSetSecret()
+      break
     default:
       console.error(`未知命令：${command}`)
-      console.error('可用命令：run | render | verify-index | sources | check-db')
+      console.error('可用命令：run | render | verify-index | sources | check-db | set-secret')
       process.exit(2)
   }
 } catch (error) {
@@ -104,7 +109,8 @@ async function cmdVerifyIndex() {
 }
 
 async function cmdSources() {
-  const config = await loadConfig()
+  // 只探测信源可达性，不连库——不该要求 DATABASE_URL
+  const config = await loadConfig({ requireDatabase: false })
   const http = new HttpClient({
     userAgent: config.userAgent,
     githubToken: config.githubToken,
@@ -155,6 +161,13 @@ async function cmdCheckDb() {
       columns[table] = rows.map((r) => r.column_name)
     }
     console.log(JSON.stringify({
+      target: maskDatabaseUrl(config.databaseUrl),
+      credentials: {
+        file: config.secretsFile,
+        fileExists: config.secretsFileExists,
+        loadedFromFile: config.secretsLoaded,
+        source: config.secretsLoaded.length > 0 ? '本地凭据文件' : '进程环境变量',
+      },
       contractVersion: version,
       counts,
       columns,
@@ -163,4 +176,62 @@ async function cmdCheckDb() {
   } finally {
     await pool.end().catch(() => {})
   }
+}
+
+/**
+ * 本地录入凭据。
+ *
+ * 口令不经对话、不进 git、不进 shell history：
+ *   node src/cli.mjs set-secret          交互输入（不回显）
+ *   node src/cli.mjs set-secret --stdin  DATABASE_URL 从管道读
+ *   node src/cli.mjs set-secret --status 只看当前状态（脱敏）
+ *
+ * 写到 harvester/.env.local（gitignored），运行时由 config.mjs 自动载入。
+ * 环境变量优先级更高，所以 systemd / CI 注入的值不会被文件覆盖。
+ */
+async function cmdSetSecret() {
+  const file = secretFilePath()
+
+  if (flags.has('--status')) {
+    const loaded = await loadEnvFile()
+    console.log(JSON.stringify({
+      file,
+      exists: loaded.exists,
+      loadedFromFile: loaded.loaded,
+      databaseUrl: maskDatabaseUrl(process.env.DATABASE_URL ?? ''),
+      githubToken: process.env.GITHUB_TOKEN || process.env.GH_TOKEN ? '已配置' : '未配置',
+    }, null, 2))
+    return
+  }
+
+  const written = []
+
+  if (flags.has('--stdin')) {
+    // 管道模式：DATABASE_URL 从 stdin 读（适合从密码管理器或 vault 里 pipe 过来）
+    const { readAllStdin } = await import('./secrets.mjs')
+    const value = (await readAllStdin()).trim()
+    if (!value) throw new Error('stdin 为空：没有读到 DATABASE_URL')
+    await upsertEnvValue('DATABASE_URL', value)
+    written.push('DATABASE_URL')
+  } else {
+    const value = await promptSecret('DATABASE_URL（输入不回显）: ')
+    const trimmed = value.trim()
+    if (!trimmed) throw new Error('DATABASE_URL 为空，已中止（未写入任何内容）')
+    await upsertEnvValue('DATABASE_URL', trimmed)
+    written.push('DATABASE_URL')
+
+    // GitHub token 可选：直接回车跳过
+    const token = await promptSecret('GITHUB_TOKEN（可回车跳过）: ')
+    if (token.trim()) {
+      await upsertEnvValue('GITHUB_TOKEN', token.trim())
+      written.push('GITHUB_TOKEN')
+    }
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    file,
+    written,
+    note: '口令已写入本地凭据文件（gitignored）。运行时自动载入；环境变量优先级更高。',
+  }, null, 2))
 }
