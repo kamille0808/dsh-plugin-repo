@@ -9,7 +9,9 @@
 | **设计方案**（v1 已评审，含双主机协作计划 §7） | [dsh-plugin-repo-design.md](dsh-plugin-repo-design.md) |
 | **可视化管理设计方案 + 开发计划**（客户端 UI，M4） | [docs/client-ui-design.md](docs/client-ui-design.md) · [docs/client-ui-dev-plan.md](docs/client-ui-dev-plan.md) |
 | **V1 方案与计划**（评分录入/客观分/事件时间线） | [docs/client-ui-v1-design.md](docs/client-ui-v1-design.md) · [docs/client-ui-v1-dev-plan.md](docs/client-ui-v1-dev-plan.md) |
-| **数据契约 v0.1**（两端唯一接口）+ PG migrations | [contract/](contract/CONTRACT.md) |
+| **V2 方案与计划**（已安装管理增强视图、分类与 labels 本地管理） | [docs/client-ui-v2-design.md](docs/client-ui-v2-design.md) · [docs/client-ui-v2-dev-plan.md](docs/client-ui-v2-dev-plan.md) |
+| **数据契约 v0.3**（两端唯一接口）+ PG migrations | [contract/](contract/CONTRACT.md) |
+| **发现器（组件①，独立 Node 程序）** | [harvester/](harvester/README.md) · [部署物料](harvester/deploy/README.md) |
 | **种子导入脚本**（归档 6084 条 → PG；发现器 L0 参考实现） | [tools/seed/](tools/seed/seed.mjs) |
 | **插件本体**（DSH bundle：PG 增量同步 + plugin_repo 工具） | [dsh-plugin-repo/](dsh-plugin-repo/README.md) |
 
@@ -26,8 +28,19 @@
 
 数据自检：`python3 dsh-plugin-repo-archive/scripts/validate_data.py`（17/17 通过）。
 
-## 当前状态（2026-10-20）
+## 当前状态（2026-10-21）
 
-- 契约包 / 种子脚本 / 插件骨架已完成，静态验证通过（见设计文档 §7.5 与本机交付说明）；
-- 待 DBA 执行 `contract/migrations/` 两个 SQL 后，种子脚本即可灌库联调；
+- 契约包 v0.3 / 种子脚本 / 插件骨架已完成，静态验证通过（见设计文档 §7.5 与本机交付说明）；
+  v0.2（插件侧 ratings 删除本人行）与 v0.3（发现器侧 git_commit / miss_streak）是两端
+  各自独立提出的 minor，合并时按「先发布者为低版本」顺延编号；
+- **发现器（组件①）已实现**：`harvester/` 下是独立 Node 程序，已对 8 个真实信源跑通
+  「抓取 → 归一化 → 门槛 → 渲染 format-1 索引 → 官方 `parseMarketIndex` 自验」全链路，
+  产出 3490 条可安装条目；
+- **凭据入口**：`node src/cli.mjs set-secret` 隐藏输入 PG 口令与 GitHub token，
+  写进 gitignored 的 `harvester/.env.local`——**口令不经对话、不进 git**；
+- **发布渠道已定**：阿里云 ECS + 已有 nginx + 已有域名（`publisher=nginx`，原子替换 +
+  可选 rsync + 回源自检），配置示例见 [harvester/README.md](harvester/README.md) 第 6 节，
+  部署步骤与上线自检见 [harvester/deploy/README.md](harvester/deploy/README.md)；
+- PG 写入路径待 `dsh_plugin_harvester_rw` 口令到位后联调；
+- 待 DBA 执行 `contract/migrations/` 四个 SQL 后，种子脚本与发现器即可灌库联调；
 - 插件待真机安装验证（`dsh plugin --profile web add <abs path>`）。

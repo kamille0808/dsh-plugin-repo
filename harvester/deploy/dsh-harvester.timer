@@ -1,0 +1,21 @@
+# DSH 插件仓库发现器 · 定时器
+#
+# 每天 03:15 与 15:15 各跑一轮。
+# 一轮耗时 5-12 分钟（26MB 的 vbarter 注册表索引是下载大头），
+# 两轮之间间隔足够，不会重叠。
+#
+# Persistent=true：关机/停机期间错过的轮次，开机后补跑一次。
+
+[Unit]
+Description=DSH 插件仓库发现器定时任务
+Documentation=https://codeup.aliyun.com/dsh/dsh-plugin-repo
+
+[Timer]
+OnCalendar=*-*-* 03,15:00:00
+Persistent=true
+# 错过的轮次在开机后 5 分钟内补跑
+AccuracySec=5min
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

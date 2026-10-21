@@ -1,0 +1,48 @@
+# DSH 插件仓库 · 发现器 · systemd（阿里云 ECS）
+#
+# 安装：
+#   sudo cp dsh-harvester.service /etc/systemd/system/
+#   sudo cp dsh-harvester.timer  /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dsh-harvester.timer
+#
+# 运行前先手动跑一轮看日志：
+#   sudo systemctl start dsh-harvester.service
+#   journalctl -u dsh-harvester.service -n 100 --no-pager
+
+[Unit]
+Description=DSH 插件仓库发现器（抓信源 → 归一化 → 写 PG → 发布索引）
+Documentation=https://codeup.aliyun.com/dsh/dsh-plugin-repo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dsh
+Group=dsh
+WorkingDirectory=/opt/dsh-plugin-repo/harvester
+
+# 环境变量（含 PG 口令）：文件属主 root、权限 600
+EnvironmentFile=/etc/dsh-harvester/harvester.env
+
+# Node ≥ 24。用绝对路径，别依赖登录 shell 的 PATH。
+ExecStart=/usr/bin/node src/cli.mjs run
+
+# 信源抓取一轮约 5-12 分钟（26MB 的注册表索引是大头），超时放宽
+TimeoutStartSec=3600
+
+# 日志进 journald，log.mjs 已做凭据脱敏
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dsh-harvester
+
+# 一点加固：除了写 nginx 目录之外不需要别的权限
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# 唯一需要写的目录：nginx 的 root
+ReadWritePaths=/var/www
+
+[Install]
+WantedBy=multi-user.target

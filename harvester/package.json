@@ -1,0 +1,29 @@
+{
+  "name": "dsh-plugin-harvester",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 插件仓库发现器（Harvester）：定时抓取 L1/L2 信源、核验 L4 信号、事务写入 PostgreSQL 契约表，并渲染 format-1 索引与静态浏览页",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "dsh-harvester": "./src/cli.mjs"
+  },
+  "scripts": {
+    "run": "node src/cli.mjs run",
+    "run:dry": "node src/cli.mjs run --dry-run",
+    "render": "node src/cli.mjs render",
+    "verify": "node src/cli.mjs verify-index",
+    "sources": "node src/cli.mjs sources",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-plugin-manager": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-plugin-market-index": "0.2.1-rc.2",
+    "pg": "^8.13.1"
+  },
+  "optionalDependencies": {
+    "ali-oss": "^6.23.0"
+  }
+}
