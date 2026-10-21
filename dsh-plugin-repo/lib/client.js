@@ -129,7 +129,8 @@ window.__ModuleLoader__.load({
 		  catMoveOut: "\u79FB\u51FA",
 		  catInvalidTitle: "\u4E2D\u6587\u540D\u5FC5\u586B\u4E14 \u226430 \u5B57",
 		  pmUnavailable: "pluginManager \u670D\u52A1\u4E0D\u53EF\u7528\uFF08\u5F53\u524D profile \u4E0D\u652F\u6301\u63D2\u4EF6\u7BA1\u7406\uFF09",
-		  pmActionFailed: "\u64CD\u4F5C\u5931\u8D25"
+		  pmActionFailed: "\u64CD\u4F5C\u5931\u8D25",
+		  transportHint: "\u5BBF\u4E3B\u63D2\u4EF6\u7248\u672C\u8FC7\u65E7\uFF08\u7F3A installed \u7AEF\u70B9\uFF09\uFF1A\u8BF7\u91CD\u542F\u5E94\u7528\u52A0\u8F7D\u6700\u65B0\u63D2\u4EF6\u4EE3\u7801"
 		};
 		var en = {
 		  title: "Repository",
@@ -214,7 +215,8 @@ window.__ModuleLoader__.load({
 		  catMoveOut: "Move out",
 		  catInvalidTitle: "Chinese name required, \u226430 chars",
 		  pmUnavailable: "pluginManager service unavailable (this profile cannot manage plugins)",
-		  pmActionFailed: "Action failed"
+		  pmActionFailed: "Action failed",
+		  transportHint: "The host plugin is outdated (missing the installed endpoint): restart the app to load the latest plugin code"
 		};
 		var INITIAL = {
 		  status: "idle",
@@ -867,13 +869,10 @@ window.__ModuleLoader__.load({
 		    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("installedLoading") });
 		  }
 		  if (state.bundlesStatus === "error") {
-		    return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { role: "alert", style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+		    const isTransport = state.bundlesError?.code === "transport";
+		    return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { role: "alert", style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }, children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.StateDot, { state: "error" }),
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: mutedStyle, children: [
-		        t("errorPrefix"),
-		        ": ",
-		        state.bundlesError?.code ?? "unknown"
-		      ] }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: isTransport ? t("transportHint") : `${t("errorPrefix")}: ${state.bundlesError?.code ?? "unknown"}` }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", onClick: onRefresh, children: t("retry") })
 		    ] });
 		  }

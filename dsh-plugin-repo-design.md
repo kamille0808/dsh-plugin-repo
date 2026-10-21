@@ -295,7 +295,7 @@ UI 与工具同时展示两种分，客观分标注「自动计算，非安全�
 
 **遗留：**
 
-5. **包名与发布渠道**：插件包名意向（如 `dsh-plugin-repo`）、发现器仓库与数据仓库的命名/归属，发到 npm 还是仅 `github:` 安装？实现前定即可。
+5. **包名与发布渠道**：✅ 已定（2026-10-21）——GitHub 公开仓库分发：[kamille0808/dsh-plugin-repo](https://github.com/kamille0808/dsh-plugin-repo)，其他主机用 `github:kamille0808/dsh-plugin-repo#path:/dsh-plugin-repo` 安装；协作仓库在 Codeup（`origin`），GitHub（`github`）双远端推送。
 
 ---
 

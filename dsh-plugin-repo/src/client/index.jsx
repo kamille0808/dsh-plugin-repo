@@ -110,6 +110,7 @@ const zh = {
   catInvalidTitle: '中文名必填且 ≤30 字',
   pmUnavailable: 'pluginManager 服务不可用（当前 profile 不支持插件管理）',
   pmActionFailed: '操作失败',
+  transportHint: '宿主插件版本过旧（缺 installed 端点）：请重启应用加载最新插件代码',
 }
 
 const en = {
@@ -196,6 +197,7 @@ const en = {
   catInvalidTitle: 'Chinese name required, ≤30 chars',
   pmUnavailable: 'pluginManager service unavailable (this profile cannot manage plugins)',
   pmActionFailed: 'Action failed',
+  transportHint: 'The host plugin is outdated (missing the installed endpoint): restart the app to load the latest plugin code',
 }
 
 const INITIAL = {
@@ -845,10 +847,13 @@ function InstalledView({ state, t, language, onRefresh, onToggle, onRemove, onOp
     return <p style={mutedStyle}>{t('installedLoading')}</p>
   }
   if (state.bundlesStatus === 'error') {
+    const isTransport = state.bundlesError?.code === 'transport'
     return (
-      <div role="alert" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div role="alert" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <StateDot state="error" />
-        <span style={mutedStyle}>{t('errorPrefix')}: {state.bundlesError?.code ?? 'unknown'}</span>
+        <span style={mutedStyle}>
+          {isTransport ? t('transportHint') : `${t('errorPrefix')}: ${state.bundlesError?.code ?? 'unknown'}`}
+        </span>
         <Button variant="outline" size="sm" onClick={onRefresh}>{t('retry')}</Button>
       </div>
     )

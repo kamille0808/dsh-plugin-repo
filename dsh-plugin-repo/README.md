@@ -9,7 +9,9 @@ DSH 插件仓库（组件③）。从 PostgreSQL 中心库增量同步社区插�
 ## 安装
 
 ```sh
-# 桌面 App（Electron）用 desktop profile：
+# 其他主机（GitHub 公开仓库分发，插件在仓库子目录 dsh-plugin-repo/）：
+dsh plugin --profile desktop add 'github:kamille0808/dsh-plugin-repo#path:/dsh-plugin-repo'
+# 本机开发（link: 本地路径，改动即时生效）：
 dsh plugin --profile desktop add /abs/path/to/dsh-plugin-repo
 # 浏览器模式（dsh web）用 web profile：
 dsh plugin --profile web add /abs/path/to/dsh-plugin-repo
