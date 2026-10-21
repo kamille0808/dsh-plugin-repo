@@ -1,8 +1,12 @@
-# DSH 插件仓库 · 数据契约 v0.1
+# DSH 插件仓库 · 数据契约 v0.2
 
 > 本文件是「发现器（Harvester）」与「dsh-plugin-repo 插件」之间的**唯一接口**。
 > 任何一端只依赖本契约与 `migrations/` 的 DDL，不依赖对方实现。
-> 契约变更流程见 §9。配套 DDL：`migrations/0000_roles.sql`、`migrations/0001_init.sql`。
+> 契约变更流程见 §9。配套 DDL：`migrations/0000_roles.sql`、`migrations/0001_init.sql`、`migrations/0002_harvester_signals.sql`。
+>
+> 变更记录：
+> - **v0.2**（minor，发现器侧提案）：`plugins` 加 `git_commit`（format-1 git 源所需）、`plugin_checks` 加 `miss_streak`（gone 判定）；§8 索引字段口径改按官方 `parseMarketIndex` 表述。表结构见 `0002_harvester_signals.sql`，major 未变，插件侧无需同步发布。
+> - v0.1：初版。
 
 ---
 
@@ -28,6 +32,7 @@
 | `category_id` | `categories.id`；`''` = 未分类 |
 | `stars` | GitHub API 快照值。**该环境数值整体偏高，仅作参考**（调研归档口径，2026-10-20）；展示需标注快照时间 |
 | `npm_versions` | `[{ver, time}]`，`time` 可 NULL；发现器按时间倒序维护 |
+| `git_commit` | 仓库默认分支 HEAD 提交 SHA（40 位小写 hex）；`''` = 未核验。format-1 索引的 git 源条目需要它才有可钉住的可安装版本（见 §8） |
 | `consensus_votes` | 被人工策展源收录的票数（当前满分 7，见 §3 名录） |
 | `status` | `active` / `renamed` / `archived` / `gone`（见 §6） |
 | `updated_at` | **增量同步水印**，由触发器维护：仅业务字段真实变化时推进；INSERT 取 `now()` |
@@ -105,7 +110,12 @@
 
 ## 8. format-1 索引发布（发现器 → 公网只读出口）
 
-- 发现器每轮从 PG 渲染官方 [format-1 索引](https://cdn.jsdelivr.net/npm/dsh-plugin-catalog/index.json) 兼容的 `index.json`：只含公共字段子集（name / title / description / category / keywords / repository / versions[{version, published, engines}] / icon），不含 PG 内部字段、ratings、本地数据。
+- 发现器每轮从 PG 渲染官方 [format-1 索引](https://cdn.jsdelivr.net/npm/dsh-plugin-catalog/index.json) 兼容的 `index.json`：只含公共字段子集，不含 PG 内部字段、ratings、本地数据。
+- **字段口径以官方校验器 `@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex` 为准**（发现器每轮发布前必须自验通过）。format-1 的实际结构：
+  - 顶层：`format: 1`；`title`（必填，本地化文本，必须含 `en`）；`description`（可选，本地化文本）；`metadata`（可选：`categories` / `labels` / `sortKeys` 三组声明）；`plugins`（必填数组）。
+  - `plugins[]`：`name`（**必须是合法 npm 包名**，索引内唯一）；`title` / `description`（本地化文本）；`icon`（可选，`data:` 图标或绝对/相对 URL）；`author` / `homepage`（可选）；`repository`（可选，`{url, directory?}`）；`metadata`（可选，`{category?, keywords[], labels[], sortKeys{}}`；category/labels/sortKey 的 id 必须在 `metadata` 中声明）；`versions`（**必填非空数组**）。
+  - `versions[]`：`version`（**精确 SemVer**）；`publishTimestamp`（**必填**，Unix 秒整数）；`source`（**必填**，`{type:'npm', registry?}` 或 `{type:'git', url, commit, path?}`，`commit` 为 40 位小写 hex）；`engines`（可选，`{dsh?: SemVer range}`）。
+  - 同一插件的 `name` 为 npm 包名；未发布 npm 的插件用仓库派生的合成名 `@<owner>/<repo>`（monorepo 子包追加 `.<子路径>`），其 `source.type='git'` 并用 `plugins.git_commit` 钉住提交。
 - 发布到公网静态托管（首选阿里云 OSS 静态网站，备选 GitHub Pages），URL 供任意 DSH「发现 → 添加索引源」直接使用。
 - 随索引发布一个静态浏览页（web 形态）。
 
