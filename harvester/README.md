@@ -1,4 +1,4 @@
-# DSH 插件仓库 · 发现器（Harvester）
+﻿# DSH 插件仓库 · 发现器（Harvester）
 
 > 组件①：**独立运行的 Node.js 程序**，不是 DSH 插件。由一台主机常驻定时运行。
 > 职责：抓信源 → 归一化 → 过入库门槛 → 事务写 PostgreSQL 契约表 → 从库渲染
@@ -158,7 +158,43 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
 每阶段的写操作独立事务；某阶段失败不影响已提交阶段。游标与摘要写在
 `harvester_state`（`cursor:*` / `source:<id>` / `last-run`），崩溃重启后续跑。
 
-## 6. format-1 索引的两条重要取舍
+## 6. 发布的两种 publisher 与发布守门
+
+### publisher：产出物放哪
+
+发现器每轮产出两个文件：`index.json`（format-1 索引）与 `index.html`（静态浏览页）。
+publisher 决定把它们放到哪：
+
+| publisher | 行为 | 需要什么 |
+| --- | --- | --- |
+| `file`（默认） | 写到本地目录 `HARVESTER_OUT_DIR`（默认 `harvester/dist/`），**不上传任何东西** | 无 |
+| `oss` | 用可选依赖 `ali-oss` 直接传到阿里云 OSS | `OSS_BUCKET` / `OSS_REGION` / `OSS_PREFIX` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_PUBLIC_BASE_URL` |
+
+**为什么默认 `file`**：契约 §8 说发布到公网静态托管（首选 OSS，备选 GitHub Pages），
+但设计文档 §7.4 明确写着「静态页/index.json 发布渠道（待落实）」——渠道还没定，
+发现器不该替这个决策做主。`file` 不需要云凭据，cron / systemd / CI 任何环境都能跑；
+产物就是一个标准静态目录，nginx root、rsync、GitHub Pages 工作流、OSS 同步、
+Cloudflare Pages 都能直接吃。等渠道定了再切 `oss` 只需改环境变量。
+
+> **一个容易踩的点**：`HARVESTER_INDEX_BASE_URL` 是 `index.json` **最终公开地址**。
+> 它有两个用途——format-1 里相对图标的解析基准，以及每轮发布前的
+> `parseMarketIndex` 自验基准。用 `file` publisher 时必须把它设成你实际部署的地址，
+> 否则自验是在错误的基准上做的。
+
+### 发布守门：不让残缺索引覆盖完整索引
+
+8 个信源里任一轮网络抖动，可能只剩三四个源有数据。若照发，公开索引会从
+3484 条掉到 767 条——对已经把它加进 DSH「发现」页的用户是**静默的能力回退**。
+
+所以发布前会比对候选数相对上一轮的跌幅：超过 `HARVESTER_MAX_CATALOG_DROP`
+（默认 40%）就**跳过本轮发布**，只记一条警告到运行摘要。判定口径与 vbarter
+注册表自己的做法一致（「published 数量比上一版下降超过 40% 就中止写入」）。
+上一轮的候选数存在 `harvester_state` 的 `catalog-size` 键。
+
+注意这只挡**发布**；PG 里的数据照常写（源快照也照常更新），所以信源恢复后
+下一轮自然回到正常水平。
+
+## 7. format-1 索引的两条重要取舍
 
 1. **`plugins[].name` 必须是合法 npm 包名**（官方校验器口径），而契约的
    `plugins.id` 是 `owner/repo`。因此：
@@ -171,7 +207,7 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
    既无 npm 版本又无 `git_commit` 的插件会先进库（插件侧仍能搜到），等 L4 核验
    补上 `git_commit` 后才进公开索引。
 
-## 7. 配置
+## 8. 配置
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -187,6 +223,7 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
 | `HARVESTER_CANDIDATE_PER_RUN` | `100` | 每轮候选池处理条数 |
 | `HARVESTER_OUT_DIR` | `harvester/dist` | `publisher=file` 的输出目录 |
 | `HARVESTER_BROWSE_LIMIT` | `5000` | 浏览页最多收录多少条（按共识票→star 排序取前 N；`0` = 不限）。完整目录在 PG 与 format-1 索引里 |
+| `HARVESTER_MAX_CATALOG_DROP` | `0.4` | 候选数相对上一轮的最大跌幅，超过就**跳过本轮发布**（见第 6 节） |
 | `HARVESTER_PUBLISHER` | `file` | `file` \| `oss` |
 | `HARVESTER_INDEX_BASE_URL` | `https://dsh-plugin-repo.pages.dev` | 索引公开地址前缀（参与图标相对路径解析与自验） |
 | `OSS_BUCKET` / `OSS_REGION` / `OSS_PREFIX` / `OSS_PUBLIC_BASE_URL` | — | `publisher=oss` 时必填 bucket/region |
@@ -203,7 +240,7 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
 | `?sslmode=verify-full&sslrootcert=<RDS CA 路径>` | 加密且验证书（正式） |
 | `?sslmode=require` | 记警告并按 no-verify 处理（不按 verify-full，避免误报） |
 
-## 8. 凭据纪律
+## 9. 凭据纪律
 
 - `DATABASE_URL` / `GITHUB_TOKEN` 只从环境变量读，不落配置文件。
 - 日志统一经 `src/log.mjs` 脱敏：URI 里的口令、名字里带 token/secret/password/
@@ -211,7 +248,7 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
 - 导出物（`index.json` / `index.html`）只含公共字段：不含 PG 内部字段、ratings、
   本地数据、凭据与本机路径（契约 §4.5）。
 
-## 9. 定时运行
+## 10. 定时运行
 
 ### systemd timer（Linux）
 
@@ -244,7 +281,7 @@ $env:DATABASE_URL='...'; $env:GITHUB_TOKEN='...'
 把 `npm ci && node src/cli.mjs run` 作为定时流水线步骤，连接串与 token 走
 CI 的环境变量/密钥管理。
 
-## 10. 已验证 / 未验证
+## 11. 已验证 / 未验证
 
 ### 已验证
 

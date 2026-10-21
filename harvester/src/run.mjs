@@ -17,7 +17,7 @@ import { fetchSource, searchGithubTopic, searchNpmKeywords, verifyPlugin } from 
 import { readState, writeState, readSourceSnapshot, writeSourceSnapshot, readCursor, writeCursor, writeLastRun } from './state.mjs'
 import { renderMarketIndex } from './render-index.mjs'
 import { buildBrowseData, renderBrowsePage } from './render-page.mjs'
-import { publish } from './publish.mjs'
+import { publish, shouldPublish } from './publish.mjs'
 import { parseMarketIndex } from '@deepseek-ai/dsh-plugin-market-index'
 import { contractId, buildInstallSpec, isValidNpmName, parseGithubUrl } from './normalize.mjs'
 
@@ -96,6 +96,7 @@ export async function runHarvester(config, options = {}) {
     summary.updatedPlugins = persisted.updated
     summary.unchangedPlugins = persisted.unchanged
     summary.removedFromLists = persisted.removed.length
+    summary.candidates = candidates.size
     for (const event of persisted.events) {
       summary.events += 1
       summary.eventKinds[event.kind] = (summary.eventKinds[event.kind] ?? 0) + 1
@@ -132,9 +133,29 @@ export async function runHarvester(config, options = {}) {
       ['index.html', page],
     ])
 
-    if (!options.dryRun) {
+    // 守门：信源大面积失败时不要用「残缺索引」覆盖「完整索引」
+    const previousSize = Number(await readState(pool, 'catalog-size', 0)) || 0
+    const currentSize = summary.candidates
+    const gate = shouldPublish({ previousSize, currentSize, maxCatalogDrop: config.maxCatalogDrop })
+    const dropRatio = gate.dropRatio
+    if (!options.dryRun && !gate.publish) {
+      summary.published = {
+        target: '(已跳过：本轮信源大面积失败，避免用残缺索引覆盖完整索引)',
+        written: [],
+      }
+      summary.publishSkipped = true
+      summary.catalogDrop = { previous: previousSize, current: currentSize, ratio: Number(dropRatio.toFixed(3)) }
+      log.warn('信源大面积失败，跳过本轮发布', {
+        previous: previousSize,
+        current: currentSize,
+        dropRatio: Number(dropRatio.toFixed(3)),
+        threshold: config.maxCatalogDrop,
+        failedSources: summary.sources.failed.map((s) => s.source_id),
+      })
+    } else if (!options.dryRun) {
       const published = await publish(config, files)
       summary.published = published
+      await writeState(pool, 'catalog-size', currentSize)
     } else {
       summary.published = { target: '(dry-run 未发布)', written: [...files.keys()] }
     }

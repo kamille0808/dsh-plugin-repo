@@ -90,6 +90,8 @@ export async function loadConfig(options = {}) {
     // 浏览页最多收录多少条（按共识票→star 排序取前 N；0 = 不限）。
     // 完整目录在 PG 与 format-1 索引里，浏览页是给人看的那一面。
     browseLimit: num(process.env.HARVESTER_BROWSE_LIMIT, 5000),
+    // 候选数相对上一轮的最大跌幅，超过就跳过发布（信源大面积失败的保险丝）
+    maxCatalogDrop: num(process.env.HARVESTER_MAX_CATALOG_DROP, 0.4),
     publisher: process.env.HARVESTER_PUBLISHER ?? 'file',
     ossBucket: process.env.OSS_BUCKET ?? '',
     ossRegion: process.env.OSS_REGION ?? '',

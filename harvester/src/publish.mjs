@@ -10,6 +10,28 @@ import path from 'node:path'
 import { log } from './log.mjs'
 
 /**
+ * 发布守门：信源大面积失败时，不允许用残缺索引覆盖完整索引。
+ *
+ * 背景：发现器有 8 个信源。任一轮网络抖动，可能只剩三四个源有数据。
+ * 若照发，公开索引会从 3484 条掉到 767 条——对已经把它加进
+ * DSH「发现」页的用户是静默的能力回退。
+ *
+ * 判定口径与 vbarter 注册表自己的做法一致：
+ * 「若新快照 published 数量比上一版下降超过 40%，中止写入」。
+ *
+ * @param {object} p
+ * @param {number} p.previousSize  上一轮发布的候选数（0 = 没有基线）
+ * @param {number} p.currentSize   本轮候选数
+ * @param {number} p.maxCatalogDrop 允许的最大跌幅（0.4 = 40%）
+ * @returns {{publish: boolean, dropRatio: number}}
+ */
+export function shouldPublish({ previousSize, currentSize, maxCatalogDrop }) {
+  if (!previousSize || previousSize <= 0) return { publish: true, dropRatio: 0 }
+  const dropRatio = (previousSize - currentSize) / previousSize
+  return { publish: dropRatio <= maxCatalogDrop, dropRatio }
+}
+
+/**
  * @param {object} config
  * @param {Map<string, string>} files  相对路径 → 内容
  */

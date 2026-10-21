@@ -168,8 +168,7 @@ test('npm 出现更高版本产生 update-available 事件', async () => {
   assert.deepEqual(updateEvents[0].detail, { from: '1.0.0', to: '2.0.0' })
 })
 
-test('双语源的中文描述不会顶掉英文描述', async () => {
-  const client = fakeClient()
+test('双语源的中文描述不会顶掉英文描述', async () => {  const client = fakeClient()
   const candidates = mergeCandidates(
     [
       {
