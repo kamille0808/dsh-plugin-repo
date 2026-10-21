@@ -6,7 +6,7 @@
  */
 import { log } from './log.mjs'
 import { HttpError } from './http.mjs'
-import { parseMarkdownList, parseMarketIndex } from './sources.mjs'
+import { parseMarkdownList, parseMarketIndex, parseVbarterRegistry } from './sources.mjs'
 import { parseGithubUrl, contractId, isValidNpmName, normalizeNpmVersions } from './normalize.mjs'
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,17 @@ export async function fetchSource(http, source, options = {}) {
   // 大清单（awesome 主清单 2MB+）需要更长的下载窗口
   const timeoutMs = source.timeoutMs ?? options.timeoutMs
   try {
+    if (source.kind === 'vbarter-registry') {
+      // 同一个大文件被两个信源共用（curated / full 是同一份数据的两种视图），
+      // 走缓存只下载一次，保证两边的快照一致
+      const cache = options.cache
+      let doc = cache?.get(source.url)
+      if (!doc) {
+        doc = await http.json(source.url, timeoutMs ? { timeoutMs } : {})
+        cache?.set(source.url, doc)
+      }
+      return { ok: true, sourceId: source.source_id, entries: parseVbarterRegistry(doc, source.filter) }
+    }
     if (source.kind === 'market-index') {
       const index = await http.json(source.url, timeoutMs ? { timeoutMs } : {})
       return { ok: true, sourceId: source.source_id, entries: parseMarketIndex(index) }

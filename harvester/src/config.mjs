@@ -87,6 +87,9 @@ export async function loadConfig(options = {}) {
 
     // 产出物
     outDir: process.env.HARVESTER_OUT_DIR ?? path.join(ROOT, 'dist'),
+    // 浏览页最多收录多少条（按共识票→star 排序取前 N；0 = 不限）。
+    // 完整目录在 PG 与 format-1 索引里，浏览页是给人看的那一面。
+    browseLimit: num(process.env.HARVESTER_BROWSE_LIMIT, 5000),
     publisher: process.env.HARVESTER_PUBLISHER ?? 'file',
     ossBucket: process.env.OSS_BUCKET ?? '',
     ossRegion: process.env.OSS_REGION ?? '',

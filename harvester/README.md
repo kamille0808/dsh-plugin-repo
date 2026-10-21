@@ -103,27 +103,39 @@ harvester/
 | L1 | `kejixiaoliang` | `raw.githubusercontent.com/kejixiaoliang/awesome-dsh-plugins/main/README.md` | ✅ | 已接入 |
 | L1 | `beancookie` | `raw.githubusercontent.com/beancookie/awesome-dsh-plugin/main/README.md` | ✅ | 已接入 |
 | L1 | `dshopen` | `https://dshopen.org/index.json` | ✅ | 已接入 |
-| L1 | `vbarter-curated` | — | ✅ | **URL 待补**（见下） |
-| L1 | `vbarter-full` | — | ✅ | **URL 待补**（见下） |
+| L1 | `vbarter-curated` | `raw.githubusercontent.com/vbarter/dsh-plugin-registry/main/data/plugins.json`（筛 `source=curated`） | ✅ | 已接入 |
+| L1 | `vbarter-full` | 同上（筛 `source=discovered`） | ✅ | 已接入 |
 | L2 | `dsh-plugin-catalog` | `cdn.jsdelivr.net/npm/dsh-plugin-catalog/index.json` | ❌ | 已接入 |
 | L3 | `topic-scan` | GitHub topic `dsh-plugin` 搜索 | ❌ | 已接入 |
 | L3 | `npm-scan` | npm `keywords:dsh-plugin` 搜索 | ❌ | 已接入 |
 
-> **vbarter 两个源**：契约 §3 收录了它们（先期调研归档里的 vbarter 注册表），
-> 但公开网络上未定位到对应清单地址。配置里保留条目并标 `url: null` +
-> `enabled: false`，运行器会跳过并计入 `sources.skipped`——**不伪造 URL**。
-> 拿到地址后填进 `config/sources.json` 并置 `enabled: true` 即可，无需改代码。
+> **vbarter 两个源是什么**：`vbarter` 是 GitHub 用户 `vbarter`，其项目
+> [`vbarter/dsh-plugin-registry`](https://github.com/vbarter/dsh-plugin-registry)
+> 是一个社区 DSH 插件注册表（站点 [dsplugin.app](https://dsplugin.app/)）。
+> 它的数据文件 `data/plugins.json`（schemaVersion 2）里每条都有
+> `source: "curated" | "discovered"` 字段：
+> - `curated` = 人工提交并经审核通过的条目 → 对应契约的 **`vbarter-curated`**（策展子集）
+> - `discovered` = GitHub topic `dsh-plugin` 自动发现、并校验过 `dsh.bundle`/`dsh.plugin` 的条目
+>   → 对应契约的 **`vbarter-full`**（全量自动发现）
+>
+> 两个视图**互斥**：同一注册表不把同一个插件算两票（共识票要跨注册表才有区分度）。
+> 它们共用一次下载（26MB，解析器按 `filter.source` 切两刀），保证两份快照一致。
+> 注意该文件里的 `id` 用的是 `owner/repo#子路径` 记法，与契约的
+> `owner/repo#path:/子路径` 不同——契约 id 一律从 `url` 推导。
 
 `node src/cli.mjs sources` 会逐个探测可达性并报出每源解析到的条目数。
 
 ### 解析器适配
 
-社区清单格式各异，当前两个通用解析器覆盖了主流形态：
+社区清单格式各异，当前三个通用解析器覆盖了主流形态：
 
 - `markdown-list` —— `### 分类标题` + `- [名字](链接) - 描述`，兼容表格行
   `| [名字](链接) | 描述 |`，以及非标准形态（整行含 GitHub 链接）的兜底。
   分类标题经 `config/categories.json` 的 alias 表归一到契约的 23 个内置分类。
 - `market-index` —— 官方 format-1 索引 JSON，取 npm 名、版本时间线、仓库地址、分类。
+- `vbarter-registry` —— vbarter 注册表的 `data/plugins.json`（schemaVersion 2），
+  按 `source` 字段切 curated / discovered 两刀；安装 spec 从 `install` 字段
+  （`dsh plugin --profile web add <spec>`）里提取，仓库与契约 id 从 `url` 推导。
 
 monorepo 子包从 `https://github.com/o/r/tree/<branch>/<path>` 推出
 `owner/repo#path:/<path>`；format-1 侧用 `repository.directory` 对齐。
@@ -174,6 +186,7 @@ Phase D  渲染+校验+发布  从库渲染 index.json + index.html → 官方 p
 | `HARVESTER_GONE_MISS_THRESHOLD` | `3` | 连续多少轮 404 判定 gone |
 | `HARVESTER_CANDIDATE_PER_RUN` | `100` | 每轮候选池处理条数 |
 | `HARVESTER_OUT_DIR` | `harvester/dist` | `publisher=file` 的输出目录 |
+| `HARVESTER_BROWSE_LIMIT` | `5000` | 浏览页最多收录多少条（按共识票→star 排序取前 N；`0` = 不限）。完整目录在 PG 与 format-1 索引里 |
 | `HARVESTER_PUBLISHER` | `file` | `file` \| `oss` |
 | `HARVESTER_INDEX_BASE_URL` | `https://dsh-plugin-repo.pages.dev` | 索引公开地址前缀（参与图标相对路径解析与自验） |
 | `OSS_BUCKET` / `OSS_REGION` / `OSS_PREFIX` / `OSS_PUBLIC_BASE_URL` | — | `publisher=oss` 时必填 bucket/region |
@@ -251,9 +264,13 @@ CI 的环境变量/密钥管理。
 - **PG 写入路径未端到端跑通**：本机没有 `dsh_plugin_harvester_rw` 的口令
   （交接说明三：口令走线下渠道，不在任何文档/聊天记录里）。失败点仅在口令。
   拿到口令后按第 1 节跑 `run` + `tools/contract-check.mjs` 即可完成验收 T1。
-- **`vbarter-curated` / `vbarter-full` 的 URL 待补**：公开网络上未定位到
-  vbarter 注册表的清单地址（见第 4 节）。拿到地址后填 `config/sources.json`
-  并置 `enabled: true` 即可，无需改代码。
+- **`vbarter-curated` / `vbarter-full` 已定位并接入**：源为
+  `vbarter/dsh-plugin-registry` 的 `data/plugins.json`（站点 dshplugin.app），
+> 按 `source` 字段切成策展子集与全量自动发现两刀（见第 4 节）。
+  唯一待确认的是契约 §3 的措辞「vbarter 全量自动发现」到底指
+  `source=discovered`（本实现，判据：与 curated 互斥、避免同注册表重复计票）
+  还是「策展+自动发现的合集」——若是后者，改 `config/sources.json` 里
+  `vbarter-full` 的 `filter` 即可。
 - **静态托管渠道未实测**：`publisher=file` 已验证（产出 `dist/`）；
   `publisher=oss` 的代码路径就绪但未连真实 OSS 跑过（需要 Bucket 与 AccessKey）。
 - **L4 核验未连真实 GitHub 跑满批**：核验逻辑与事件判定有单测覆盖，

@@ -7,8 +7,15 @@
 import { log } from './log.mjs'
 import { parseContractId } from './normalize.mjs'
 
-/** 生成浏览页所需的公开条目。 */
-export function buildBrowseData(catalog) {
+/** 生成浏览页所需的公开条目。
+ *
+ * limit > 0 时只保留前 N 条（按共识票 → star 排序），并给出 total，
+ * 页面会显示「显示 N / 共 M 个插件」，不做无声截断。
+ * 完整目录在 PG 与 format-1 索引里，浏览页是给人看的那一面。
+ */
+export function buildBrowseData(catalog, options = {}) {
+  const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 0
+  const descMax = options.descMax ?? 240
   const categories = catalog.categories.map((c) => ({
     id: c.id,
     titleZh: c.title_zh,
@@ -16,11 +23,12 @@ export function buildBrowseData(catalog) {
   }))
   const categoryMap = new Map(categories.map((c) => [c.id, c]))
 
-  const plugins = catalog.plugins
+  const all = catalog.plugins
     .filter((p) => p.status !== 'gone')
     .map((p) => {
       const parsed = parseContractId(p.id)
       const version = (p.npm_versions ?? [])[0]?.ver ?? ''
+      const desc = String(p.desc_zh || p.desc_en || '').trim()
       return {
         id: p.id,
         name: p.name,
@@ -29,7 +37,7 @@ export function buildBrowseData(catalog) {
         subPath: parsed?.subPath ?? '',
         category: p.category_id,
         categoryTitle: categoryMap.get(p.category_id)?.titleZh || categoryMap.get(p.category_id)?.titleEn || '',
-        desc: p.desc_zh || p.desc_en,
+        desc: desc.length > descMax ? `${desc.slice(0, descMax)}…` : desc,
         stars: p.stars,
         votes: p.consensus_votes,
         version,
@@ -41,7 +49,15 @@ export function buildBrowseData(catalog) {
     })
     .sort((a, b) => b.votes - a.votes || b.stars - a.stars || a.id.localeCompare(b.id))
 
-  return { categories, plugins }
+  const plugins = limit > 0 ? all.slice(0, limit) : all
+  if (plugins.length < all.length) {
+    log.info('浏览页已按上限截断（完整目录在 PG 与 format-1 索引里）', {
+      shown: plugins.length,
+      total: all.length,
+      limit,
+    })
+  }
+  return { categories, plugins, total: all.length }
 }
 
 /** 渲染自包含的 HTML 浏览页（无外部依赖，静态托管即可）。 */
@@ -145,7 +161,7 @@ export function renderBrowsePage(data, meta = {}) {
       if (!text) return true;
       return (p.name + ' ' + p.npm + ' ' + p.id + ' ' + p.desc + ' ' + p.github).toLowerCase().indexOf(text) >= 0;
     });
-    count.textContent = rows.length + ' / ' + DATA.plugins.length + ' 个插件';
+    count.textContent = rows.length + ' / ' + (DATA.total || DATA.plugins.length) + ' 个插件';
     if (!rows.length) {
       list.innerHTML = '<div class="empty">没有匹配的插件。</div>';
       return;

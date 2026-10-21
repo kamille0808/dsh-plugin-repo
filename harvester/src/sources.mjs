@@ -8,7 +8,7 @@
  *   markdown-list —— 社区人工策展清单（### 分类 + - [名字](链接) - 描述；兼容表格行）
  *   market-index  —— 官方 format-1 索引（npm 包 + 版本 + 仓库 + 分类）
  */
-import { parseGithubUrl } from './normalize.mjs'
+import { parseGithubUrl, isValidNpmName } from './normalize.mjs'
 
 /** 非分类的章节标题（避免把 "Plugins"/"Badge" 当成分类）。 */
 const STOP_HEADINGS = new Set([
@@ -111,6 +111,65 @@ export function stripMarkdown(text) {
     .replace(/<[^>]+>/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+/**
+ * vbarter 注册表（vbarter/dsh-plugin-registry，站点 dshplugin.app）。
+ *
+ * 数据结构（schemaVersion 2）：
+ *   plugins[]: { id, name, owner, url, description:{zh,en}, category, stars,
+ *                pushedAt, source: "curated"|"discovered", install, topics, ... }
+ *
+ * 契约 §3 的两个 vbarter 信源正好对应这个 source 字段：
+ *   vbarter-curated → source === "curated"    （人工策展子集）
+ *   vbarter-full    → source === "discovered" （全量自动发现）
+ * 二者互斥，同一插件不会被同一注册表算两票。
+ *
+ * 注意：这里的 id 是 `owner/repo#子路径` 记法，与契约的 `owner/repo#path:/子路径`
+ * 不同。契约 id 一律从 url（GitHub tree 链接）推导，与 awesome 清单同源。
+ */
+export function parseVbarterRegistry(doc, filter = {}) {
+  const categoryTitles = new Map()
+  for (const [id, decl] of Object.entries(doc?.categories ?? {})) {
+    categoryTitles.set(id, decl?.en ?? decl?.zh ?? id)
+  }
+
+  const entries = []
+  const seen = new Set()
+  for (const plugin of doc?.plugins ?? []) {
+    if (filter.source && plugin?.source !== filter.source) continue
+    const parsed = parseGithubUrl(plugin?.url ?? '')
+    if (!parsed) continue
+    const key = `${parsed.owner}/${parsed.repo}#${parsed.subPath}`.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const spec = extractInstallSpec(plugin?.install)
+    entries.push({
+      repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}`,
+      subPath: parsed.subPath,
+      parsed: { ...parsed, subPath: parsed.subPath },
+      displayName: plugin?.name ?? '',
+      description: '',
+      descEn: typeof plugin?.description?.en === 'string' ? plugin.description.en : '',
+      descZh: typeof plugin?.description?.zh === 'string' ? plugin.description.zh : '',
+      categoryTitle: categoryTitles.get(plugin?.category) ?? plugin?.category ?? '',
+      npm: spec && isValidNpmName(spec) ? spec : '',
+      versions: [],
+      installSpec: spec,
+      stars: Number(plugin?.stars ?? 0),
+      pushedAt: plugin?.pushedAt ?? null,
+    })
+  }
+  return entries
+}
+
+/** 从 `dsh plugin --profile web add <spec>` 里取出安装 spec。 */
+export function extractInstallSpec(install) {
+  const text = String(install ?? '').trim()
+  if (!text) return ''
+  const m = /\badd\s+"?([^"\s]+)"?/.exec(text)
+  return m ? m[1] : ''
 }
 
 /** format-1 索引 → 条目列表。 */

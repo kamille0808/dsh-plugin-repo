@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * 发现器命令行。
  *
@@ -77,7 +77,7 @@ async function cmdRender() {
     const index = renderMarketIndex(catalog)
     const indexUrl = `${config.indexBaseUrl.replace(/\/+$/, '')}/index.json`
     validateIndex(index, indexUrl)
-    const page = renderBrowsePage(buildBrowseData(catalog), { generatedAt: new Date().toISOString() })
+    const page = renderBrowsePage(buildBrowseData(catalog, { limit: config.browseLimit }), { generatedAt: new Date().toISOString() })
     const published = await publish(config, new Map([
       ['index.json', JSON.stringify(index, null, 2)],
       ['index.html', page],

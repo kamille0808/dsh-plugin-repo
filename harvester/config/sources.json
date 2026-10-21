@@ -59,22 +59,26 @@
     {
       "source_id": "vbarter-curated",
       "title": "vbarter 注册表人工策展子集",
-      "kind": "markdown-list",
-      "url": null,
+      "kind": "vbarter-registry",
+      "url": "https://raw.githubusercontent.com/vbarter/dsh-plugin-registry/main/data/plugins.json",
+      "filter": { "source": "curated" },
+      "timeoutMs": 600000,
       "votes": true,
-      "enabled": false,
-      "homepage": null,
-      "notes": "URL 待补：先期调研归档里的 vbarter 注册表，公开网络上未定位到对应清单地址；请 Dennis 提供后填入 url 并置 enabled=true"
+      "enabled": true,
+      "homepage": "https://dsplugin.app/",
+      "notes": "vbarter/dsh-plugin-registry 的 source=curated 条目（人工策展/提交审核通过）。与 vbarter-full 同源但互斥——同一注册表不重复计两票"
     },
     {
       "source_id": "vbarter-full",
       "title": "vbarter 全量自动发现",
-      "kind": "markdown-list",
-      "url": null,
+      "kind": "vbarter-registry",
+      "url": "https://raw.githubusercontent.com/vbarter/dsh-plugin-registry/main/data/plugins.json",
+      "filter": { "source": "discovered" },
+      "timeoutMs": 600000,
       "votes": true,
-      "enabled": false,
-      "homepage": null,
-      "notes": "URL 待补：同上。v0.1 沿用调研口径按人工策展型计票"
+      "enabled": true,
+      "homepage": "https://dsplugin.app/",
+      "notes": "同一注册表的 source=discovered 条目（GitHub topic dsh-plugin 自动发现 + dsh.bundle/plugin 有效性校验）。与 vbarter-curated 共用一次下载"
     }
   ],
   "indexes": [

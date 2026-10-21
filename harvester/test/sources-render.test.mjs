@@ -3,10 +3,11 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseMarkdownList, parseMarketIndex, stripMarkdown } from '../src/sources.mjs'
+import { parseMarkdownList, parseMarketIndex, parseVbarterRegistry, extractInstallSpec, stripMarkdown } from '../src/sources.mjs'
 import { renderMarketIndex } from '../src/render-index.mjs'
 import { buildBrowseData } from '../src/render-page.mjs'
 import { validateIndex } from '../src/run.mjs'
+import { contractId } from '../src/normalize.mjs'
 
 const AWESOME_SAMPLE = `
 ## Plugins
@@ -75,6 +76,79 @@ const MARKET_INDEX = {
     },
   ],
 }
+
+test('vbarter 注册表解析：curated / discovered 两种视图互斥', () => {
+  const doc = {
+    schemaVersion: 2,
+    categories: { dev: { en: 'Development & Runtime', zh: '开发与运行时' } },
+    plugins: [
+      {
+        id: 'strukto-ai/mirage#dsh',
+        name: 'mirage#dsh',
+        owner: 'strukto-ai',
+        url: 'https://github.com/strukto-ai/mirage/tree/main/typescript/packages/dsh',
+        description: { zh: '中文简介', en: 'English description' },
+        category: 'dev',
+        stars: 3433,
+        pushedAt: '2026-08-15T09:27:31Z',
+        source: 'curated',
+        install: 'dsh plugin --profile web add @struktoai/mirage-dsh',
+      },
+      {
+        id: 'liustack/modlens',
+        name: 'modlens',
+        owner: 'liustack',
+        url: 'https://github.com/liustack/modlens',
+        description: { zh: '另一个', en: 'Another' },
+        category: 'dev',
+        stars: 120,
+        source: 'discovered',
+        install: 'dsh plugin --profile web add github:liustack/modlens',
+      },
+    ],
+  }
+
+  const curated = parseVbarterRegistry(doc, { source: 'curated' })
+  assert.equal(curated.length, 1)
+  assert.equal(curated[0].parsed.owner, 'strukto-ai')
+  assert.equal(curated[0].parsed.subPath, 'typescript/packages/dsh')
+  // 契约 id 从 url 推导（vbarter 自己的 id 记法与契约不同）
+  assert.equal(contractId(curated[0].parsed.owner, curated[0].parsed.repo, curated[0].parsed.subPath),
+    'strukto-ai/mirage#path:/typescript/packages/dsh')
+  assert.equal(curated[0].npm, '@struktoai/mirage-dsh')
+  assert.equal(curated[0].descEn, 'English description')
+  assert.equal(curated[0].descZh, '中文简介')
+  assert.equal(curated[0].categoryTitle, 'Development & Runtime')
+  assert.equal(curated[0].stars, 3433)
+
+  const discovered = parseVbarterRegistry(doc, { source: 'discovered' })
+  assert.equal(discovered.length, 1)
+  assert.equal(discovered[0].npm, '', 'github: 形式的 spec 不是 npm 包名')
+  assert.equal(discovered[0].parsed.subPath, '')
+
+  // 两个视图互斥：同一插件不会被同一注册表算两票
+  const ids = new Set([...curated, ...discovered].map((e) => e.parsed.owner))
+  assert.equal(ids.size, 2)
+})
+
+test('vbarter 注册表解析：无 install 字段时降级为空 spec', () => {
+  const doc = {
+    plugins: [{
+      id: 'x/y', name: 'y', url: 'https://github.com/x/y',
+      description: {}, category: 'dev', source: 'discovered',
+    }],
+  }
+  const entries = parseVbarterRegistry(doc, { source: 'discovered' })
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].npm, '')
+})
+
+test('extractInstallSpec 从安装命令里取 spec', () => {
+  assert.equal(extractInstallSpec('dsh plugin --profile web add @scope/pkg'), '@scope/pkg')
+  assert.equal(extractInstallSpec('dsh plugin --profile web add github:o/r'), 'github:o/r')
+  assert.equal(extractInstallSpec('dsh plugin --profile web add "github:o/r#path:/p"'), 'github:o/r#path:/p')
+  assert.equal(extractInstallSpec(''), '')
+})
 
 test('format-1 索引解析：npm 名 / 仓库 / 版本时间', () => {
   const entries = parseMarketIndex(MARKET_INDEX)
@@ -219,6 +293,25 @@ test('只有一种语言时，en 与 zh 用同一个值（format-1 要求含 en�
   const entry = parsed.plugins.find((p) => p.name === '@scope/dsh-npm')
   assert.equal(entry.description.en, 'Only English')
   assert.equal(entry.description.zh, 'Only English')
+})
+
+test('浏览页按上限截断但给出总数（不做无声截断）', () => {
+  const many = {
+    plugins: Array.from({ length: 30 }, (_, i) => ({
+      id: `owner/p${String(i).padStart(2, '0')}`,
+      name: `p${i}`, npm: '', install_spec: `github:owner/p${i}`,
+      github: `https://github.com/owner/p${i}`, category_id: 'memory',
+      desc_zh: '', desc_en: `desc ${i}`, license: '', stars: i,
+      last_push_at: null, npm_versions: [], consensus_votes: i % 3,
+      status: 'active', sources: ['awesome'],
+    })),
+    categories: [{ id: 'memory', title_zh: '记忆', title_en: 'Memory', builtin: true }],
+  }
+  const data = buildBrowseData(many, { limit: 10 })
+  assert.equal(data.plugins.length, 10)
+  assert.equal(data.total, 30)
+  // 按共识票 → star 排序，前 10 条是票数最高的
+  assert.equal(data.plugins[0].votes, 2)
 })
 
 test('浏览页数据只含公共字段', () => {

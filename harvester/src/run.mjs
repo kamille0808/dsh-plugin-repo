@@ -126,7 +126,7 @@ export async function runHarvester(config, options = {}) {
     const indexUrl = `${config.indexBaseUrl.replace(/\/+$/, '')}/index.json`
     validateIndex(index, indexUrl)
 
-    const page = renderBrowsePage(buildBrowseData(state3), { generatedAt: new Date().toISOString() })
+    const page = renderBrowsePage(buildBrowseData(state3, { limit: config.browseLimit }), { generatedAt: new Date().toISOString() })
     const files = new Map([
       ['index.json', JSON.stringify(index, null, 2)],
       ['index.html', page],
@@ -222,7 +222,7 @@ export async function runOffline(config, options = {}) {
   const indexUrl = `${config.indexBaseUrl.replace(/\/+$/, '')}/index.json`
   validateIndex(index, indexUrl)
 
-  const page = renderBrowsePage(buildBrowseData(catalog), { generatedAt: new Date().toISOString() })
+  const page = renderBrowsePage(buildBrowseData(catalog, { limit: config.browseLimit }), { generatedAt: new Date().toISOString() })
   const published = await publish(config, new Map([
     ['index.json', JSON.stringify(index, null, 2)],
     ['index.html', page],
@@ -286,6 +286,7 @@ async function runVerificationPhase(pool, http, config, state, summary, options 
 
 async function collectAllSources(http, config, summary) {
   const collected = []
+  const docCache = new Map()
   const all = [
     ...config.sources.curated.map((s) => ({ ...s, layer: 'L1' })),
     ...config.sources.indexes.map((s) => ({ ...s, layer: 'L2' })),
@@ -296,7 +297,7 @@ async function collectAllSources(http, config, summary) {
       log.warn('信源已跳过', { source: source.source_id, reason: source.url ? 'disabled' : 'url-missing' })
       continue
     }
-    const result = await fetchSource(http, source)
+    const result = await fetchSource(http, source, { cache: docCache })
     if (result.ok) {
       summary.sources.ok.push({ source_id: source.source_id, layer: source.layer, entries: result.entries.length })
       log.info('信源抓取完成', { source: source.source_id, layer: source.layer, entries: result.entries.length })
