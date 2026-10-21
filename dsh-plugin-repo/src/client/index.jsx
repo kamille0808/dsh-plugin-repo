@@ -31,6 +31,9 @@ const zh = {
   sortVotes: '共识票排序',
   sortStars: 'Star 排序',
   sortUpdated: '最近更新',
+  sortScore: '客观分排序',
+  scoreShort: '分',
+  objectiveScoreTitle: '客观分',
   loading: '正在读取仓库镜像',
   retry: '重试',
   refresh: '刷新',
@@ -48,7 +51,19 @@ const zh = {
   ratingTitle: '人工评分',
   ratingNone: '暂无评分',
   ratingAverage: '{count} 人均分 {average}',
+  ratingNotAudit: '自动计算，非安全审计结论',
+  myRatingTitle: '我的评分',
+  notePlaceholder: '短评（≤500 字，可选）',
+  save: '保存',
+  saving: '保存中…',
+  savedLocal: '已存本地，待同步',
+  unrateBtn: '删除我的评分',
+  rateHint: '未配置 scoredBy：请到本插件的配置里填写本机评分标识（<host>-<user>）',
+  rateInvalidScore: '分数须为 1-5 星',
+  rateNotFound: '插件不在本地镜像中',
+  rateFailed: '操作失败，请重试',
   eventsTitle: '最近事件',
+  eventsEmpty: '暂无动态',
   installTitle: '安装',
   installSpecLabel: '安装 spec',
   copySpec: '复制 spec',
@@ -65,6 +80,9 @@ const en = {
   sortVotes: 'Sort by consensus votes',
   sortStars: 'Sort by stars',
   sortUpdated: 'Recently updated',
+  sortScore: 'Sort by objective score',
+  scoreShort: 'score',
+  objectiveScoreTitle: 'Objective score',
   loading: 'Reading the local repository mirror',
   retry: 'Retry',
   refresh: 'Refresh',
@@ -82,7 +100,19 @@ const en = {
   ratingTitle: 'Ratings',
   ratingNone: 'No ratings yet',
   ratingAverage: '{count} raters, average {average}',
+  ratingNotAudit: 'Auto-computed; not a security audit',
+  myRatingTitle: 'My rating',
+  notePlaceholder: 'Short note (≤500 chars, optional)',
+  save: 'Save',
+  saving: 'Saving…',
+  savedLocal: 'Saved locally, pending sync',
+  unrateBtn: 'Delete my rating',
+  rateHint: 'scoredBy is not configured: set your host rating identity (<host>-<user>) in this plugin\'s config',
+  rateInvalidScore: 'Score must be 1-5 stars',
+  rateNotFound: 'Plugin not in the local mirror',
+  rateFailed: 'Operation failed, please retry',
   eventsTitle: 'Recent events',
+  eventsEmpty: 'No recent events',
   installTitle: 'Install',
   installSpecLabel: 'Install spec',
   copySpec: 'Copy spec',
@@ -98,8 +128,10 @@ const INITIAL = {
   query: { text: '', category: '', sort: 'votes' },
   categories: [], // [{id, titleZh, titleEn, builtin, plugins}]
   listing: null, // {total, offset, items, hasMore}
-  detail: null, // entry() 结果（含 plugin/ratingSummary/recentEvents）
+  detail: null, // entry() 结果（含 plugin/objectiveScore/ratingSummary/myRating/recentEvents）
   detailStatus: 'idle', // idle | loading | error
+  rateError: null, // rate/unrate 失败的 {code, message}（null = 无）
+  rateBusy: false,
 }
 
 /** 插件页「仓库」标签控制器：持有快照 store，经 connection rpc 读宿主镜像。 */
@@ -173,10 +205,17 @@ class RepoController {
         void this.search(false)
       },
       openEntry: (id) => {
+        this.patch({ rateError: null })
         void this.loadEntry(id)
       },
       closeEntry: () => {
-        if (!this.disposed) this.patch({ detail: null, detailStatus: 'idle' })
+        if (!this.disposed) this.patch({ detail: null, detailStatus: 'idle', rateError: null })
+      },
+      submitRating: (id, score, note) => {
+        void this.saveRating(id, score, note)
+      },
+      removeRating: (id) => {
+        void this.deleteRating(id)
       },
     }
   }
@@ -208,6 +247,40 @@ class RepoController {
       error: null,
       listing: { total: value.total, offset: value.offset, items, hasMore: offset + value.items.length < value.total },
     })
+  }
+
+  /** 保存评分：按返回 code 映射引导文案，成功后重拉详情（含 synced 徽标）。 */
+  async saveRating(id, score, note) {
+    this.patch({ rateBusy: true, rateError: null })
+    const answer = await this.call('rate', { id, score, note })
+    if (this.disposed) return
+    this.patch({ rateBusy: false })
+    if (!answer.ok) {
+      this.patch({ rateError: answer.error })
+      return
+    }
+    if (!answer.value.ok) {
+      this.patch({ rateError: answer.value.error })
+      return
+    }
+    await this.loadEntry(id)
+  }
+
+  /** 删除本人评分；成功后重拉详情。 */
+  async deleteRating(id) {
+    this.patch({ rateBusy: true, rateError: null })
+    const answer = await this.call('unrate', { id })
+    if (this.disposed) return
+    this.patch({ rateBusy: false })
+    if (!answer.ok) {
+      this.patch({ rateError: answer.error })
+      return
+    }
+    if (!answer.value.ok) {
+      this.patch({ rateError: answer.value.error })
+      return
+    }
+    await this.loadEntry(id)
   }
 
   async loadEntry(id) {
@@ -249,6 +322,24 @@ const codeStyle = {
   background: 'var(--dsh-sunken, rgba(128,128,128,.12))', wordBreak: 'break-all',
 }
 const eventListStyle = { display: 'flex', flexDirection: 'column', gap: 6, margin: 0, padding: 0, listStyle: 'none', fontSize: 12 }
+const scoreBarOuterStyle = {
+  height: 8, borderRadius: 4, flex: 1, minWidth: 80, overflow: 'hidden',
+  background: 'var(--dsh-sunken, rgba(128,128,128,.12))',
+}
+const scoreBarInnerStyle = { height: '100%', borderRadius: 4, background: 'var(--dsh-accent, rgba(64,128,255,.8))' }
+const starStyle = (active) => ({
+  border: 'none', background: 'transparent', cursor: 'pointer', padding: '0 2px',
+  fontSize: 18, lineHeight: 1, color: active ? '#f5a623' : 'var(--dsh-muted, rgba(128,128,128,.55))',
+})
+
+/** 更新事件 kind → 图标（契约 §6 名录；未知 kind 用通用圆点）。 */
+const EVENT_ICONS = {
+  'new-plugin': '🆕',
+  'update-available': '⬆️',
+  'renamed': '✏️',
+  'archived': '📦',
+  'removed-from-list': '🚫',
+}
 
 function categoryTitle(c, language) {
   const zhActive = language === 'zh'
@@ -258,6 +349,36 @@ function categoryTitle(c, language) {
 function formatWhen(text, t) {
   if (!text) return ''
   return text.replace('T', ' ').slice(0, 16)
+}
+
+/** rate/unrate 失败 code → 引导文案键（RLS 拒绝 = scoredBy 未配置 → 引导去插件配置）。 */
+const RATE_ERROR_KEYS = {
+  'plugin-repo/scored-by-required': 'rateHint',
+  'plugin-repo/invalid-score': 'rateInvalidScore',
+  'plugin-repo/not-found': 'rateNotFound',
+}
+
+/** 五星输入：hover 预览、点击选定（不引第三方组件）。 */
+function StarInput({ value, onChange, disabled, t }) {
+  const [hover, setHover] = React.useState(0)
+  const shown = hover || value
+  return (
+    <span role="radiogroup" aria-label={t('myRatingTitle')} onMouseLeave={() => setHover(0)}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          style={starStyle(n <= shown)}
+          disabled={disabled}
+          role="radio"
+          aria-label={String(n)}
+          aria-checked={value === n}
+          onMouseEnter={() => setHover(n)}
+          onClick={() => onChange(n)}
+        >{n <= shown ? '★' : '☆'}</button>
+      ))}
+    </span>
+  )
 }
 
 /** 一张插件卡片。 */
@@ -272,6 +393,7 @@ function EntryCard({ item, categoryName, t, onOpen }) {
         <span style={cardDescStyle}>{item.desc || '—'}</span>
         <span style={cardMetaStyle}>
           {categoryName ? <Tag>{categoryName}</Tag> : null}
+          <Tag title={t('ratingNotAudit')}>{t('scoreShort')} {item.objectiveScore}</Tag>
           <Tag>★ {item.stars}</Tag>
           <Tag>{item.consensusVotes} {t('votes')}</Tag>
           {item.status !== 'active' ? <Tag>{item.status}</Tag> : null}
@@ -282,9 +404,17 @@ function EntryCard({ item, categoryName, t, onOpen }) {
 }
 
 /** 详情视图（V0 为页内替换视图，够用且避免抽屉焦点管理）。 */
-function EntryDetail({ detail, categories, t, language, onBack }) {
+function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate, rateError, rateBusy }) {
   const p = detail.plugin
+  const my = detail.myRating
   const [copied, setCopied] = React.useState(false)
+  // 评分输入本地态；详情重拉（保存/删除后）同步回填
+  const [score, setScore] = React.useState(my?.score ?? 0)
+  const [note, setNote] = React.useState(my?.note ?? '')
+  React.useEffect(() => {
+    setScore(detail.myRating?.score ?? 0)
+    setNote(detail.myRating?.note ?? '')
+  }, [detail.myRating?.score, detail.myRating?.note])
   const category = categories.find((c) => c.id === p.categoryId)
   const copy = async () => {
     try {
@@ -295,6 +425,8 @@ function EntryDetail({ detail, categories, t, language, onBack }) {
       // 剪贴板权限失败时静默：spec 文本本身可见可手选
     }
   }
+  const scoreTotal = detail.objectiveScore?.total ?? 0
+  const rateErrorText = rateError ? t(RATE_ERROR_KEYS[rateError.code] ?? 'rateFailed') : null
   return (
     <div style={detailStyle} data-plugin-repo-detail={p.id}>
       <div style={detailHeadStyle}>
@@ -319,6 +451,49 @@ function EntryDetail({ detail, categories, t, language, onBack }) {
             .replace('{count}', String(detail.ratingSummary.count))
             .replace('{average}', String(detail.ratingSummary.average))}</span>
           : <span style={mutedStyle}>{t('ratingNone')}</span>}
+        <span style={mutedStyle}> · {t('ratingNotAudit')}</span>
+      </div>
+      <div>
+        <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('objectiveScoreTitle')}</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <strong style={{ fontSize: 18, minWidth: 28, textAlign: 'right' }}>{scoreTotal}</strong>
+          <div style={scoreBarOuterStyle}>
+            <div style={{ ...scoreBarInnerStyle, width: `${Math.max(0, Math.min(100, scoreTotal))}%` }} />
+          </div>
+        </div>
+        <p style={{ ...mutedStyle, margin: '4px 0 0' }}>{t('ratingNotAudit')}</p>
+      </div>
+      <div>
+        <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('myRatingTitle')}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <StarInput value={score} onChange={setScore} disabled={rateBusy} t={t} />
+            {my && !my.synced ? <Tag>{t('savedLocal')}</Tag> : null}
+          </div>
+          <Input
+            value={note}
+            placeholder={t('notePlaceholder')}
+            aria-label={t('notePlaceholder')}
+            maxLength={500}
+            disabled={rateBusy}
+            onChange={(event) => setNote(event.target.value)}
+            style={{ maxWidth: 420 }}
+          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={rateBusy || score < 1}
+              onClick={() => onRate(p.id, score, note)}
+            >{rateBusy ? t('saving') : t('save')}</Button>
+            {my ? (
+              <Button variant="ghost" size="sm" disabled={rateBusy} onClick={() => onUnrate(p.id)}>
+                {t('unrateBtn')}
+              </Button>
+            ) : null}
+            {rateErrorText ? <span role="alert" style={{ ...mutedStyle, color: 'var(--dsh-danger, #c0392b)' }}>{rateErrorText}</span> : null}
+          </div>
+        </div>
       </div>
       {Array.isArray(p.npmVersions) && p.npmVersions.length > 0 ? (
         <div>
@@ -328,18 +503,22 @@ function EntryDetail({ detail, categories, t, language, onBack }) {
           </div>
         </div>
       ) : null}
-      {Array.isArray(detail.recentEvents) && detail.recentEvents.length > 0 ? (
+      {Array.isArray(detail.recentEvents) ? (
         <div>
           <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('eventsTitle')}</div>
-          <ul style={eventListStyle}>
-            {detail.recentEvents.map((e, i) => (
-              <li key={i} style={cardMetaStyle}>
-                <StateDot state="ongoing" />
-                <span>{e.kind}</span>
-                <span style={mutedStyle}>{formatWhen(e.at)}</span>
-              </li>
-            ))}
-          </ul>
+          {detail.recentEvents.length === 0 ? (
+            <span style={mutedStyle}>{t('eventsEmpty')}</span>
+          ) : (
+            <ul style={eventListStyle}>
+              {detail.recentEvents.map((e, i) => (
+                <li key={i} style={cardMetaStyle}>
+                  <span aria-hidden="true">{EVENT_ICONS[e.kind] ?? '•'}</span>
+                  <span>{e.kind}</span>
+                  <span style={mutedStyle}>{formatWhen(e.at)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ) : null}
       <div>
@@ -372,7 +551,7 @@ function RepoSection(props) {
     [categories, language],
   )
   const busy = state.status === 'loading'
-  const sortLabels = { votes: t('sortVotes'), stars: t('sortStars'), updated: t('sortUpdated') }
+  const sortLabels = { votes: t('sortVotes'), stars: t('sortStars'), updated: t('sortUpdated'), score: t('sortScore') }
 
   let body = null
   if (state.detailStatus === 'loading') {
@@ -385,6 +564,10 @@ function RepoSection(props) {
         t={t}
         language={language}
         onBack={props.closeEntry}
+        onRate={props.submitRating}
+        onUnrate={props.removeRating}
+        rateError={state.rateError}
+        rateBusy={state.rateBusy}
       />
     )
   } else if (state.status === 'idle' || state.status === 'loading') {

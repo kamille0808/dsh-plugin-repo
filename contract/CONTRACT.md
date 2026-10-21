@@ -1,8 +1,8 @@
-# DSH 插件仓库 · 数据契约 v0.1
+# DSH 插件仓库 · 数据契约 v0.2
 
 > 本文件是「发现器（Harvester）」与「dsh-plugin-repo 插件」之间的**唯一接口**。
 > 任何一端只依赖本契约与 `migrations/` 的 DDL，不依赖对方实现。
-> 契约变更流程见 §9。配套 DDL：`migrations/0000_roles.sql`、`migrations/0001_init.sql`。
+> 契约变更流程见 §9。配套 DDL：`migrations/0000_roles.sql`、`migrations/0001_init.sql`、`migrations/0002_ratings_delete_own.sql`。
 
 ---
 
@@ -100,6 +100,7 @@
   - `scored_by` 命名：`<host>-<user>`，小写，仅 `[a-z0-9-]`（如 `mbp-dennis`）；
   - 插件连接后执行 `SET app.scored_by = '<本机标识>'`，RLS 强制只能 INSERT/UPDATE 本人行；未设置时全部拒绝（fail-closed）；
   - 冲突语义：同键 upsert，后写赢（同一人改自己的分，无他人覆盖问题）；
+  - 删除（v0.2）：插件可删除本人行（`GRANT DELETE` + `ratings_delete_own` 策略，RLS 同样限本人行）；
   - 离线：先落本地队列（`synced=false`），恢复后补写；
   - 展示：各人的分并存，可聚合均分/分布；均分仅为参考，固定标注「非安全审计结论」。
 
@@ -111,7 +112,7 @@
 
 ## 9. 契约版本与变更流程
 
-- 版本存 `harvester_state.contract_version`：`{"major": 0, "minor": 1}`。
+- 版本存 `harvester_state.contract_version`：`{"major": 0, "minor": 2}`。
 - **minor**（加列、加表、加枚举值、加 source_id）：任一端可提案，写入 migrations 新文件并升 minor，对端无需同步发布。
 - **major**（改语义、删列、改水印/评分协议）：必须两端评审通过后同时升级；发现器先写库升 major，插件校验不通过时降级为只读并提示。
 - 迁移脚本一律新增文件（`0002_*.sql`…），不改已发布文件；脚本幂等。

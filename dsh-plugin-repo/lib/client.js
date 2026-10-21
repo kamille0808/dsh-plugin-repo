@@ -53,6 +53,9 @@ window.__ModuleLoader__.load({
 		  sortVotes: "\u5171\u8BC6\u7968\u6392\u5E8F",
 		  sortStars: "Star \u6392\u5E8F",
 		  sortUpdated: "\u6700\u8FD1\u66F4\u65B0",
+		  sortScore: "\u5BA2\u89C2\u5206\u6392\u5E8F",
+		  scoreShort: "\u5206",
+		  objectiveScoreTitle: "\u5BA2\u89C2\u5206",
 		  loading: "\u6B63\u5728\u8BFB\u53D6\u4ED3\u5E93\u955C\u50CF",
 		  retry: "\u91CD\u8BD5",
 		  refresh: "\u5237\u65B0",
@@ -70,7 +73,19 @@ window.__ModuleLoader__.load({
 		  ratingTitle: "\u4EBA\u5DE5\u8BC4\u5206",
 		  ratingNone: "\u6682\u65E0\u8BC4\u5206",
 		  ratingAverage: "{count} \u4EBA\u5747\u5206 {average}",
+		  ratingNotAudit: "\u81EA\u52A8\u8BA1\u7B97\uFF0C\u975E\u5B89\u5168\u5BA1\u8BA1\u7ED3\u8BBA",
+		  myRatingTitle: "\u6211\u7684\u8BC4\u5206",
+		  notePlaceholder: "\u77ED\u8BC4\uFF08\u2264500 \u5B57\uFF0C\u53EF\u9009\uFF09",
+		  save: "\u4FDD\u5B58",
+		  saving: "\u4FDD\u5B58\u4E2D\u2026",
+		  savedLocal: "\u5DF2\u5B58\u672C\u5730\uFF0C\u5F85\u540C\u6B65",
+		  unrateBtn: "\u5220\u9664\u6211\u7684\u8BC4\u5206",
+		  rateHint: "\u672A\u914D\u7F6E scoredBy\uFF1A\u8BF7\u5230\u672C\u63D2\u4EF6\u7684\u914D\u7F6E\u91CC\u586B\u5199\u672C\u673A\u8BC4\u5206\u6807\u8BC6\uFF08<host>-<user>\uFF09",
+		  rateInvalidScore: "\u5206\u6570\u987B\u4E3A 1-5 \u661F",
+		  rateNotFound: "\u63D2\u4EF6\u4E0D\u5728\u672C\u5730\u955C\u50CF\u4E2D",
+		  rateFailed: "\u64CD\u4F5C\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5",
 		  eventsTitle: "\u6700\u8FD1\u4E8B\u4EF6",
+		  eventsEmpty: "\u6682\u65E0\u52A8\u6001",
 		  installTitle: "\u5B89\u88C5",
 		  installSpecLabel: "\u5B89\u88C5 spec",
 		  copySpec: "\u590D\u5236 spec",
@@ -86,6 +101,9 @@ window.__ModuleLoader__.load({
 		  sortVotes: "Sort by consensus votes",
 		  sortStars: "Sort by stars",
 		  sortUpdated: "Recently updated",
+		  sortScore: "Sort by objective score",
+		  scoreShort: "score",
+		  objectiveScoreTitle: "Objective score",
 		  loading: "Reading the local repository mirror",
 		  retry: "Retry",
 		  refresh: "Refresh",
@@ -103,7 +121,19 @@ window.__ModuleLoader__.load({
 		  ratingTitle: "Ratings",
 		  ratingNone: "No ratings yet",
 		  ratingAverage: "{count} raters, average {average}",
+		  ratingNotAudit: "Auto-computed; not a security audit",
+		  myRatingTitle: "My rating",
+		  notePlaceholder: "Short note (\u2264500 chars, optional)",
+		  save: "Save",
+		  saving: "Saving\u2026",
+		  savedLocal: "Saved locally, pending sync",
+		  unrateBtn: "Delete my rating",
+		  rateHint: "scoredBy is not configured: set your host rating identity (<host>-<user>) in this plugin's config",
+		  rateInvalidScore: "Score must be 1-5 stars",
+		  rateNotFound: "Plugin not in the local mirror",
+		  rateFailed: "Operation failed, please retry",
 		  eventsTitle: "Recent events",
+		  eventsEmpty: "No recent events",
 		  installTitle: "Install",
 		  installSpecLabel: "Install spec",
 		  copySpec: "Copy spec",
@@ -123,9 +153,12 @@ window.__ModuleLoader__.load({
 		  listing: null,
 		  // {total, offset, items, hasMore}
 		  detail: null,
-		  // entry() 结果（含 plugin/ratingSummary/recentEvents）
-		  detailStatus: "idle"
+		  // entry() 结果（含 plugin/objectiveScore/ratingSummary/myRating/recentEvents）
+		  detailStatus: "idle",
 		  // idle | loading | error
+		  rateError: null,
+		  // rate/unrate 失败的 {code, message}（null = 无）
+		  rateBusy: false
 		};
 		var RepoController = class {
 		  constructor(ctx) {
@@ -192,10 +225,17 @@ window.__ModuleLoader__.load({
 		        void this.search(false);
 		      },
 		      openEntry: (id) => {
+		        this.patch({ rateError: null });
 		        void this.loadEntry(id);
 		      },
 		      closeEntry: () => {
-		        if (!this.disposed) this.patch({ detail: null, detailStatus: "idle" });
+		        if (!this.disposed) this.patch({ detail: null, detailStatus: "idle", rateError: null });
+		      },
+		      submitRating: (id, score, note) => {
+		        void this.saveRating(id, score, note);
+		      },
+		      removeRating: (id) => {
+		        void this.deleteRating(id);
 		      }
 		    };
 		  }
@@ -225,6 +265,38 @@ window.__ModuleLoader__.load({
 		      error: null,
 		      listing: { total: value.total, offset: value.offset, items, hasMore: offset + value.items.length < value.total }
 		    });
+		  }
+		  /** 保存评分：按返回 code 映射引导文案，成功后重拉详情（含 synced 徽标）。 */
+		  async saveRating(id, score, note) {
+		    this.patch({ rateBusy: true, rateError: null });
+		    const answer = await this.call("rate", { id, score, note });
+		    if (this.disposed) return;
+		    this.patch({ rateBusy: false });
+		    if (!answer.ok) {
+		      this.patch({ rateError: answer.error });
+		      return;
+		    }
+		    if (!answer.value.ok) {
+		      this.patch({ rateError: answer.value.error });
+		      return;
+		    }
+		    await this.loadEntry(id);
+		  }
+		  /** 删除本人评分；成功后重拉详情。 */
+		  async deleteRating(id) {
+		    this.patch({ rateBusy: true, rateError: null });
+		    const answer = await this.call("unrate", { id });
+		    if (this.disposed) return;
+		    this.patch({ rateBusy: false });
+		    if (!answer.ok) {
+		      this.patch({ rateError: answer.error });
+		      return;
+		    }
+		    if (!answer.value.ok) {
+		      this.patch({ rateError: answer.value.error });
+		      return;
+		    }
+		    await this.loadEntry(id);
 		  }
 		  async loadEntry(id) {
 		    this.patch({ detailStatus: "loading", detail: null });
@@ -276,6 +348,31 @@ window.__ModuleLoader__.load({
 		  wordBreak: "break-all"
 		};
 		var eventListStyle = { display: "flex", flexDirection: "column", gap: 6, margin: 0, padding: 0, listStyle: "none", fontSize: 12 };
+		var scoreBarOuterStyle = {
+		  height: 8,
+		  borderRadius: 4,
+		  flex: 1,
+		  minWidth: 80,
+		  overflow: "hidden",
+		  background: "var(--dsh-sunken, rgba(128,128,128,.12))"
+		};
+		var scoreBarInnerStyle = { height: "100%", borderRadius: 4, background: "var(--dsh-accent, rgba(64,128,255,.8))" };
+		var starStyle = (active) => ({
+		  border: "none",
+		  background: "transparent",
+		  cursor: "pointer",
+		  padding: "0 2px",
+		  fontSize: 18,
+		  lineHeight: 1,
+		  color: active ? "#f5a623" : "var(--dsh-muted, rgba(128,128,128,.55))"
+		});
+		var EVENT_ICONS = {
+		  "new-plugin": "\u{1F195}",
+		  "update-available": "\u2B06\uFE0F",
+		  "renamed": "\u270F\uFE0F",
+		  "archived": "\u{1F4E6}",
+		  "removed-from-list": "\u{1F6AB}"
+		};
 		function categoryTitle(c, language) {
 		  const zhActive = language === "zh";
 		  return zhActive ? c.titleZh || c.titleEn || c.id : c.titleEn || c.titleZh || c.id;
@@ -283,6 +380,30 @@ window.__ModuleLoader__.load({
 		function formatWhen(text, t) {
 		  if (!text) return "";
 		  return text.replace("T", " ").slice(0, 16);
+		}
+		var RATE_ERROR_KEYS = {
+		  "plugin-repo/scored-by-required": "rateHint",
+		  "plugin-repo/invalid-score": "rateInvalidScore",
+		  "plugin-repo/not-found": "rateNotFound"
+		};
+		function StarInput({ value, onChange, disabled, t }) {
+		  const [hover, setHover] = import_react.default.useState(0);
+		  const shown = hover || value;
+		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { role: "radiogroup", "aria-label": t("myRatingTitle"), onMouseLeave: () => setHover(0), children: [1, 2, 3, 4, 5].map((n) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		    "button",
+		    {
+		      type: "button",
+		      style: starStyle(n <= shown),
+		      disabled,
+		      role: "radio",
+		      "aria-label": String(n),
+		      "aria-checked": value === n,
+		      onMouseEnter: () => setHover(n),
+		      onClick: () => onChange(n),
+		      children: n <= shown ? "\u2605" : "\u2606"
+		    },
+		    n
+		  )) });
 		}
 		function EntryCard({ item, categoryName, t, onOpen }) {
 		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("li", { children: /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("button", { type: "button", style: cardStyle, onClick: onOpen, "aria-label": item.name, children: [
@@ -293,6 +414,11 @@ window.__ModuleLoader__.load({
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: cardDescStyle, children: item.desc || "\u2014" }),
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: cardMetaStyle, children: [
 		      categoryName ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: categoryName }) : null,
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_dsh_client_ui_primitives.Tag, { title: t("ratingNotAudit"), children: [
+		        t("scoreShort"),
+		        " ",
+		        item.objectiveScore
+		      ] }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_dsh_client_ui_primitives.Tag, { children: [
 		        "\u2605 ",
 		        item.stars
@@ -306,9 +432,16 @@ window.__ModuleLoader__.load({
 		    ] })
 		  ] }) });
 		}
-		function EntryDetail({ detail, categories, t, language, onBack }) {
+		function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate, rateError, rateBusy }) {
 		  const p = detail.plugin;
+		  const my = detail.myRating;
 		  const [copied, setCopied] = import_react.default.useState(false);
+		  const [score, setScore] = import_react.default.useState(my?.score ?? 0);
+		  const [note, setNote] = import_react.default.useState(my?.note ?? "");
+		  import_react.default.useEffect(() => {
+		    setScore(detail.myRating?.score ?? 0);
+		    setNote(detail.myRating?.note ?? "");
+		  }, [detail.myRating?.score, detail.myRating?.note]);
 		  const category = categories.find((c) => c.id === p.categoryId);
 		  const copy = async () => {
 		    try {
@@ -318,6 +451,8 @@ window.__ModuleLoader__.load({
 		    } catch {
 		    }
 		  };
+		  const scoreTotal = detail.objectiveScore?.total ?? 0;
+		  const rateErrorText = rateError ? t(RATE_ERROR_KEYS[rateError.code] ?? "rateFailed") : null;
 		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: detailStyle, "data-plugin-repo-detail": p.id, children: [
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: detailHeadStyle, children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: onBack, children: t("detailBack") }),
@@ -344,16 +479,63 @@ window.__ModuleLoader__.load({
 		    ] }),
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("ratingTitle") }),
-		      detail.ratingSummary ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: t("ratingAverage").replace("{count}", String(detail.ratingSummary.count)).replace("{average}", String(detail.ratingSummary.average)) }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("ratingNone") })
+		      detail.ratingSummary ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: t("ratingAverage").replace("{count}", String(detail.ratingSummary.count)).replace("{average}", String(detail.ratingSummary.average)) }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("ratingNone") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: mutedStyle, children: [
+		        " \xB7 ",
+		        t("ratingNotAudit")
+		      ] })
+		    ] }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("objectiveScoreTitle") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { style: { fontSize: 18, minWidth: 28, textAlign: "right" }, children: scoreTotal }),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: scoreBarOuterStyle, children: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...scoreBarInnerStyle, width: `${Math.max(0, Math.min(100, scoreTotal))}%` } }) })
+		      ] }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: { ...mutedStyle, margin: "4px 0 0" }, children: t("ratingNotAudit") })
+		    ] }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("myRatingTitle") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }, children: [
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(StarInput, { value: score, onChange: setScore, disabled: rateBusy, t }),
+		          my && !my.synced ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: t("savedLocal") }) : null
+		        ] }),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Input,
+		          {
+		            value: note,
+		            placeholder: t("notePlaceholder"),
+		            "aria-label": t("notePlaceholder"),
+		            maxLength: 500,
+		            disabled: rateBusy,
+		            onChange: (event) => setNote(event.target.value),
+		            style: { maxWidth: 420 }
+		          }
+		        ),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }, children: [
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		            import_dsh_client_ui_primitives.Button,
+		            {
+		              variant: "outline",
+		              size: "sm",
+		              disabled: rateBusy || score < 1,
+		              onClick: () => onRate(p.id, score, note),
+		              children: rateBusy ? t("saving") : t("save")
+		            }
+		          ),
+		          my ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", disabled: rateBusy, onClick: () => onUnrate(p.id), children: t("unrateBtn") }) : null,
+		          rateErrorText ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { role: "alert", style: { ...mutedStyle, color: "var(--dsh-danger, #c0392b)" }, children: rateErrorText }) : null
+		        ] })
+		      ] })
 		    ] }),
 		    Array.isArray(p.npmVersions) && p.npmVersions.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("versionsTitle") }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: cardMetaStyle, children: p.npmVersions.slice(0, 6).map((v) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: v.ver }, v.ver)) })
 		    ] }) : null,
-		    Array.isArray(detail.recentEvents) && detail.recentEvents.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		    Array.isArray(detail.recentEvents) ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("eventsTitle") }),
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { style: eventListStyle, children: detail.recentEvents.map((e, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("li", { style: cardMetaStyle, children: [
-		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.StateDot, { state: "ongoing" }),
+		      detail.recentEvents.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("eventsEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { style: eventListStyle, children: detail.recentEvents.map((e, i) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("li", { style: cardMetaStyle, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { "aria-hidden": "true", children: EVENT_ICONS[e.kind] ?? "\u2022" }),
 		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: e.kind }),
 		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: formatWhen(e.at) })
 		      ] }, i)) })
@@ -382,7 +564,7 @@ window.__ModuleLoader__.load({
 		    [categories, language]
 		  );
 		  const busy = state.status === "loading";
-		  const sortLabels = { votes: t("sortVotes"), stars: t("sortStars"), updated: t("sortUpdated") };
+		  const sortLabels = { votes: t("sortVotes"), stars: t("sortStars"), updated: t("sortUpdated"), score: t("sortScore") };
 		  let body = null;
 		  if (state.detailStatus === "loading") {
 		    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("loading") });
@@ -394,7 +576,11 @@ window.__ModuleLoader__.load({
 		        categories,
 		        t,
 		        language,
-		        onBack: props.closeEntry
+		        onBack: props.closeEntry,
+		        onRate: props.submitRating,
+		        onUnrate: props.removeRating,
+		        rateError: state.rateError,
+		        rateBusy: state.rateBusy
 		      }
 		    );
 		  } else if (state.status === "idle" || state.status === "loading") {

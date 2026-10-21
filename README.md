@@ -8,6 +8,7 @@
 | --- | --- |
 | **设计方案**（v1 已评审，含双主机协作计划 §7） | [dsh-plugin-repo-design.md](dsh-plugin-repo-design.md) |
 | **可视化管理设计方案 + 开发计划**（客户端 UI，M4） | [docs/client-ui-design.md](docs/client-ui-design.md) · [docs/client-ui-dev-plan.md](docs/client-ui-dev-plan.md) |
+| **V1 方案与计划**（评分录入/客观分/事件时间线） | [docs/client-ui-v1-design.md](docs/client-ui-v1-design.md) · [docs/client-ui-v1-dev-plan.md](docs/client-ui-v1-dev-plan.md) |
 | **数据契约 v0.1**（两端唯一接口）+ PG migrations | [contract/](contract/CONTRACT.md) |
 | **种子导入脚本**（归档 6084 条 → PG；发现器 L0 参考实现） | [tools/seed/](tools/seed/seed.mjs) |
 | **插件本体**（DSH bundle：PG 增量同步 + plugin_repo 工具） | [dsh-plugin-repo/](dsh-plugin-repo/README.md) |
