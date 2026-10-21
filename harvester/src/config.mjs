@@ -130,6 +130,20 @@ export async function loadConfig(options = {}) {
   config.secretsFileExists = secrets.exists
   config.secretsLoaded = secrets.loaded
 
+  // 出网代理诊断。
+  // Node 的 fetch 默认**不认** HTTP(S)_PROXY —— 必须显式开 NODE_USE_ENV_PROXY=1
+  // （Node ≥ 24 才支持，undici v7 起）。配了代理却没开这个开关的话，
+  // 现象是「连接超时」而不是「连不上代理」，极难排查，所以这里主动喊一声。
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || ''
+  if (proxyUrl && !process.env.NODE_USE_ENV_PROXY) {
+    log.warn('配置了出网代理，但未开启 NODE_USE_ENV_PROXY=1', {
+      hint: 'Node 的 fetch 默认忽略 HTTP(S)_PROXY；不开启的话代理不会生效，表现为连接超时',
+      action: '在环境变量里加 NODE_USE_ENV_PROXY=1',
+    })
+  } else if (proxyUrl) {
+    log.info('出网代理已启用', { enabled: true })
+  }
+
   // 允许入库的分类白名单：契约的 23 个内置分类 + 显式增补的
   config.knownCategories = [...(categories.known ?? []), ...(categories.extra ?? [])]
 

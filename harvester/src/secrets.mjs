@@ -34,7 +34,10 @@ export function secretFilePath() {
  */
 export function parseEnvText(text) {
   const out = {}
-  for (const rawLine of String(text ?? '').split(/\r?\n/)) {
+  // 去掉 UTF-8 BOM：Windows 上用记事本/VS 改过 .env.local 很容易带上它，
+  // 不去掉的话第一个键会被 BOM 挡住，静默失效。
+  const body = String(text ?? '').replace(/^\uFEFF/, '')
+  for (const rawLine of body.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (!line || line.startsWith('#')) continue
     const eq = line.indexOf('=')

@@ -139,3 +139,15 @@ test('连接串脱敏：无口令时原样返回', () => {
   assert.equal(maskDatabaseUrl(''), '')
   assert.equal(maskDatabaseUrl('postgres://u@host/db'), 'postgres://u@host/db')
 })
+
+test('BOM 不影响解析：Windows 编辑器改过的 .env 第一个键也要认', () => {
+  // UTF-8 BOM 挡在第一个键前面，不去掉的话 DATABASE_URL 会静默失效
+  const parsed = parseEnvText('\uFEFFDATABASE_URL=postgres://u:p@h/db\nGITHUB_TOKEN=ghp_x\n')
+  assert.equal(parsed.DATABASE_URL, 'postgres://u:p@h/db')
+  assert.equal(parsed.GITHUB_TOKEN, 'ghp_x')
+})
+
+test('BOM 不影响解析：只有一行且带 BOM', () => {
+  const parsed = parseEnvText('\uFEFFDATABASE_URL=postgres://u:p@h/db')
+  assert.equal(parsed.DATABASE_URL, 'postgres://u:p@h/db')
+})

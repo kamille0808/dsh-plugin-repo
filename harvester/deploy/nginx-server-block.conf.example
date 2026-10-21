@@ -1,0 +1,121 @@
+# DSH 插件仓库 · nginx 配置
+#
+# 发现器与 nginx 同机（阿里云 ECS），每轮把 index.json 与 index.html
+# 原子替换到 HARVESTER_NGINX_ROOT 指向的目录。
+#
+# 两种接法，按你的站点现状二选一：
+#
+#   方案 A —— 站点根目录专用于本项目（最省事）
+#   方案 B —— 已有站点，只加两个 location
+#
+# 改完：sudo nginx -t && sudo systemctl reload nginx
+
+
+# ══════════════════════════════════════════════════════════════════
+# 方案 A：新建 server 块，root 指向产物目录
+# ══════════════════════════════════════════════════════════════════
+#
+# server {
+#     listen 80;
+#     listen [::]:80;
+#     server_name <你的域名>;
+#
+#     root /var/www/<你的站点目录>;
+#     index index.html;
+#
+#     # 索引：format-1 市场索引，官方「发现」页添加的就是它
+#     location = /index.json {
+#         default_type application/json;
+#         add_header Cache-Control "public, max-age=300" always;
+#         add_header Access-Control-Allow-Origin "*" always;
+#         try_files $uri =404;
+#     }
+#
+#     # 浏览页：静态页，样式与数据全内联
+#     location = / {
+#         add_header Cache-Control "public, max-age=300" always;
+#         try_files /index.html =404;
+#     }
+#
+#     # 不开放目录浏览：web 根目录只该暴露这两个文件
+#     location / {
+#         return 404;
+#     }
+#
+#     # 3.2MB 的 JSON 与 2.8MB 的 HTML，gzip 后能小一个数量级
+#     gzip on;
+#     gzip_types application/json text/html text/css application/javascript;
+#     gzip_min_length 1024;
+#     gzip_vary on;
+# }
+
+
+# ══════════════════════════════════════════════════════════════════
+# 方案 B：已有站点，只往现有 server 块里加这两段
+# ══════════════════════════════════════════════════════════════════
+#
+# location = /index.json {
+#     alias /var/www/<你的站点目录>/index.json;
+#     default_type application/json;
+#     add_header Cache-Control "public, max-age=300" always;
+#     add_header Access-Control-Allow-Origin "*" always;
+# }
+#
+# location = /dsh-plugins {
+#     alias /var/www/<你的站点目录>/index.html;
+#     add_header Cache-Control "public, max-age=300" always;
+# }
+#
+# 注意：方案 B 下 HARVESTER_INDEX_BASE_URL 要与实际路径对上，
+# 例如 https://<你的域名>/dsh-plugins —— 但 index.json 在 /index.json，
+# 两者不同源时，相对图标的解析基准会不对。
+# 插件目前都不带图标，影响有限；但填之前想清楚。
+
+
+# ══════════════════════════════════════════════════════════════════
+# HTTPS
+# ══════════════════════════════════════════════════════════════════
+#
+# 官方「发现」页添加索引源走 HTTPS 为主，建议配上证书：
+#
+#   sudo certbot --nginx -d <你的域名>
+#
+# certbot 会自动改写 server 块并加 443 监听。验证完记得：
+#   curl -sI https://<你的域名>/index.json | head -1
+#
+# 也可手工加：
+#
+# server {
+#     listen 443 ssl http2;
+#     server_name <你的域名>;
+#
+#     ssl_certificate     /etc/letsencrypt/live/<你的域名>/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/<你的域名>/privkey.pem;
+#
+#     root /var/www/<你的站点目录>;
+#     index index.html;
+#
+#     location = /index.json {
+#         default_type application/json;
+#         add_header Cache-Control "public, max-age=300" always;
+#         add_header Access-Control-Allow-Origin "*" always;
+#         try_files $uri =404;
+#     }
+#
+#     location = / {
+#         add_header Cache-Control "public, max-age=300" always;
+#         try_files /index.html =404;
+#     }
+#
+#     location / { return 404; }
+#
+#     gzip on;
+#     gzip_types application/json text/html text/css application/javascript;
+#     gzip_min_length 1024;
+# }
+#
+# server {
+#     listen 80;
+#     server_name <你的域名>;
+#     return 301 https://$host$request_uri;
+# }

@@ -78,6 +78,13 @@ harvester/
 ├─ tools/
 │  ├─ contract-check.mjs    契约符合性检查（只读）
 │  └─ probe-sources.mjs     信源格式探针（排障用）
+├─ deploy/                  ECS 部署物料
+│  ├─ README.md             部署步骤（ECS 上，发现器与 nginx 同机）
+│  ├─ harvester.env.example 环境变量模板
+│  ├─ dsh-harvester.service systemd 服务单元
+│  ├─ dsh-harvester.timer   systemd 定时器
+│  ├─ nginx-server-block.conf.example  nginx 配置（独立站点 / 并入已有站点）
+│  └─ preflight.sh          上线前自检脚本
 └─ test/                    单测
 ```
 
@@ -360,7 +367,23 @@ server {
 
 ## 10. 定时运行
 
-### systemd timer（Linux）
+### 阿里云 ECS（当前部署形态）
+
+发现器与 nginx 同机，部署物料都在 `harvester/deploy/`：
+环境变量模板、systemd 单元与定时器、nginx 配置示例、上线前自检脚本。
+完整步骤见 **[harvester/deploy/README.md](deploy/README.md)**。
+
+```sh
+# 部署完先自检（检查 Node 版本、env 文件权限、TLS 参数写法、目录可写性、
+# 代理开关一致性、6 个信源的实际可达性、数据库连通性）
+sudo bash /opt/dsh-plugin-repo/harvester/deploy/preflight.sh
+```
+
+> **出网代理**：Node 的 `fetch` 默认**不认** `HTTP(S)_PROXY`，必须显式开
+> `NODE_USE_ENV_PROXY=1`（Node ≥ 24）。不配这个开关的现象是「连接超时」
+> 而不是「连不上代理」，极难排查——发现器启动日志里会主动警告这件事。
+
+### systemd timer（通用）
 
 ```ini
 # /etc/systemd/system/dsh-harvester.service
@@ -398,10 +421,10 @@ CI 的环境变量/密钥管理。
 
 ### 已验证
 
-- **62 项单测通过**（`node --test test/*.test.mjs`，逐个列文件名）：
+- **64 项单测通过**（`node --test test/*.test.mjs`，逐个列文件名）：
   归一化与契约 id、入库门槛、信源解析（markdown 清单 / 表格行 / format-1 索引 /
   vbarter 注册表）、索引渲染与官方校验、失败降级规则、发布守门、
-  本地凭据文件（解析 / 优先级 / 写入 / 脱敏）、nginx 发布路径（原子替换 /
+  本地凭据文件（解析 / 优先级 / 写入 / 脱敏 / BOM 容忍）、nginx 发布路径（原子替换 /
   不留临时文件 / 未知 publisher 报错 / 回源自检）、离线发布守门。
 - **对 8 个真实信源跑通离线全链路**（`node src/cli.mjs collect`）：抓取 → 归一化 →
   门槛 → 渲染 → 官方 `parseMarketIndex` 自验 → 产出 `dist/index.json` + `dist/index.html`。
