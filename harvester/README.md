@@ -255,6 +255,10 @@ CI 的环境变量/密钥管理。
   门槛 → 渲染 → 官方 `parseMarketIndex` 自验 → 产出 `dist/index.json` + `dist/index.html`。
   实测一轮：6 个信源全部成功、0 错误、6847 个去重候选、3484 条进索引，
   索引内 npm 名 100% 合法且无重名，分类恰好落在契约的 23 个内置分类里。
+- **vbarter 两个源实测**：解析数与注册表自带 stats 完全一致
+  （curated 573 / discovered 20186 / published 20759），合并候选 21370。
+- **浏览页上限实测**：用真实 20759 条数据渲染，不限时 9.37 MB，
+  上限 5000 时 2.27 MB（页面显示「5000 / 共 20759 个插件」）。
 - **PG 连通性与 TLS 路径**：47.101.216.5:5432 可达，`sslmode=no-verify` 的 TLS
   握手成功，服务端确认账号 `dsh_plugin_harvester_rw` 存在（返回
   `28P01 password authentication failed`）。
