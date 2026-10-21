@@ -104,16 +104,22 @@ harvester/
 | §6 五种事件与状态迁移 | `src/catalog.mjs` `persistCandidates()` / `applyVerification()` |
 | §7 只存原始信号，不存算好的评分 | `plugins` 表无分数字段；评分由消费侧按权重即时算 |
 | §8 format-1 索引发布 | `src/render-index.mjs`，每轮发布前跑官方 `parseMarketIndex` 自验 |
-| §9 契约版本与变更流程 | `contract/migrations/`；本次提交 `0002_harvester_signals.sql`（minor 0.1 → 0.2） |
+| §9 契约版本与变更流程 | `contract/migrations/`；本次提交 `0003_harvester_signals.sql`（minor 0.2 → 0.3） |
 
 ### 本次对契约的改动（minor）
 
-`contract/migrations/0002_harvester_signals.sql`：
+`contract/migrations/0003_harvester_signals.sql`：
 
 - `plugins.git_commit` —— 默认分支 HEAD 提交 SHA。format-1 的 git 源条目必须有
   40 位 commit 才有可钉住的可安装版本。
 - `plugin_checks.miss_streak` —— 连续核验 404 计数，用于 §6 的「连续多轮 404 → gone」。
-- `contract_version` minor 0.1 → 0.2；major 未变，插件侧只校验 major，**无需同步发布**。
+- `contract_version` minor 0.2 → 0.3；major 未变，插件侧只校验 major，**无需同步发布**。
+
+> **为什么是 0003 而不是 0002**：插件侧同期独立提出了 minor（`ratings` 授予 DELETE +
+> `ratings_delete_own` 策略），占 v0.2 且已先行发布。契约 §9 允许任一端提 minor，
+> 但版本号只有一个——按「先发布者为低版本」排序，发现器的信号列增量顺延为 v0.3，
+> 迁移文件编号同步顺延。本文件在合并前从未发布过，重命名不违反「不改已发布文件」。
+> 两处 minor 互不冲突，可独立应用。详见 `contract/CONTRACT.md` 变更记录与 §9。
 
 同时修正了 CONTRACT.md §8 的索引字段表述：原表述漏了 format-1 必填的
 `versions[].publishTimestamp` 与 `versions[].source`，照原文渲染无法通过官方校验。

@@ -1,8 +1,13 @@
 -- ============================================================================
--- DSH 插件仓库 · 契约 v0.2 增量（发现器侧提案，minor 升级）
+-- DSH 插件仓库 · 契约 v0.3 增量（发现器侧提案，minor 升级）
 --
 -- 变更类型：minor（加列 + 澄清索引字段口径）—— 两端无需同步发布，插件侧
 --           只校验 major（契约 §5.6 / §9），major 仍为 0，不受影响。
+--
+-- 编号说明：本文件原拟名 0002_harvester_signals.sql。合并插件侧同期提出的
+--           0002_ratings_delete_own.sql（已发布，占 v0.2）时，按契约 §9
+--           「先发布者为低版本」顺延为 0003。本文件在合并前从未发布过，
+--           重命名不违反「不改已发布文件」。
 --
 -- 变更内容：
 --   1) plugins.git_commit
@@ -23,8 +28,8 @@
 --      本次只改文档表述，不改表结构。
 --
 -- 执行人：DBA / PG 管理账号（owner 角色成员）
--- 执行方式：psql -h <host> -U <admin> -d dsh_plugin_repo_dev -f 0002_harvester_signals.sql
---           psql -h <host> -U <admin> -d dsh_plugin_repo     -f 0002_harvester_signals.sql
+-- 执行方式：psql -h <host> -U <admin> -d dsh_plugin_repo_dev -f 0003_harvester_signals.sql
+--           psql -h <host> -U <admin> -d dsh_plugin_repo     -f 0003_harvester_signals.sql
 -- 幂等：可重复执行。
 -- ============================================================================
 
@@ -36,8 +41,9 @@ ALTER TABLE plugins ADD COLUMN IF NOT EXISTS git_commit TEXT NOT NULL DEFAULT ''
 -- 2) 连续核验未命中计数（gone 判定）
 ALTER TABLE plugin_checks ADD COLUMN IF NOT EXISTS miss_streak INTEGER NOT NULL DEFAULT 0;
 
--- 3) 契约版本：minor 0.1 → 0.2
-INSERT INTO harvester_state (key, value) VALUES ('contract_version', '{"major": 0, "minor": 2}'::jsonb)
+-- 3) 契约版本：minor 0.1 → 0.3
+--    （0.2 由插件侧的 0002_ratings_delete_own.sql 取得，该脚本本身不改版本行）
+INSERT INTO harvester_state (key, value) VALUES ('contract_version', '{"major": 0, "minor": 3}'::jsonb)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 COMMIT;

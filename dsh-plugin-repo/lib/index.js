@@ -30,6 +30,13 @@ const Config = z.object({
     .description('单批拉取行数。'),
   githubToken: z.string().default('')
     .description('可选 GitHub PAT，仅用于 check 动作的即席单仓库核验。'),
+  scoreWeights: z.object({
+    votes: z.number().min(0).max(1).default(0.30).description('共识票权重'),
+    activity: z.number().min(0).max(1).default(0.25).description('维护活跃度权重'),
+    stars: z.number().min(0).max(1).default(0.20).description('star 分位权重'),
+    verified: z.number().min(0).max(1).default(0.15).description('源码验证标记权重'),
+    iconDoc: z.number().min(0).max(1).default(0.10).description('图标文档权重（V1 以简介非空近似）'),
+  }).description('客观分五分项权重（0-1，和不为 1 时自动归一化）；契约 §7：分值为消费侧策略，改权重只影响本机展示。'),
 })
 
 // ---------------------------------------------------------------------------
@@ -55,6 +62,8 @@ const pluginRecord = zod.object({
   status: zod.string().default('active'),
   updatedAt: zod.string().default(''),
   labels: zod.array(zod.string()).default([]),
+  localCategoryId: zod.string().default(''), // 本地分类覆盖（local- 前缀或 ''=跟随中心库）；同步时保留
+  sources: zod.array(zod.string()).default([]), // 收录信源 source_id 名录（契约 §3）；客观分「源码验证」分项依据
 })
 
 const categoryRecord = zod.object({
@@ -105,8 +114,8 @@ const SUPPORTED_CONTRACT_MAJOR = 0
 // 契约 §5：键集分页 (updated_at, id) 复合游标——种子同事务产生大量相同 updated_at，
 // 单时间戳水印会在跨批边界丢行/死循环，复合游标严格推进、天然幂等
 
-/** PG plugins 行 → 本地镜像记录（本地 labels 保留）。 */
-function mapRow(row, labels) {
+/** PG plugins 行 → 本地镜像记录（本地 labels、localCategoryId 与已同步 sources 保留）。 */
+function mapRow(row, labels, sources, localCategoryId) {
   const versions = Array.isArray(row.npm_versions) ? row.npm_versions : []
   return {
     id: row.id,
@@ -125,6 +134,8 @@ function mapRow(row, labels) {
     status: row.status ?? 'active',
     updatedAt: new Date(row.updated_at).toISOString(),
     labels,
+    localCategoryId: localCategoryId ?? '',
+    sources: sources ?? [],
   }
 }
 
@@ -153,6 +164,8 @@ async function apply(ctx, config) {
   const ratings = domain.table('ratings')
   const events = domain.table('events')
   const syncState = domain.table('sync_state')
+
+  let starOrder = null // 全量 star 升序数组（分位缓存）；同步拉动 plugins 后置 null 重算
 
   // -------------------------------------------------------------------------
   // PG 增量同步（契约 §5）
@@ -212,8 +225,9 @@ async function apply(ctx, config) {
           if (row.status === 'gone') {
             await plugins.delete(key)
           } else {
-            const rec = mapRow(row, plugins.get(key)?.labels ?? [])
-            if (JSON.stringify(plugins.get(key)) !== JSON.stringify(rec)) await plugins.put(key, rec)
+            const cur = plugins.get(key)
+            const rec = mapRow(row, cur?.labels ?? [], cur?.sources ?? [], cur?.localCategoryId ?? '')
+            if (JSON.stringify(cur) !== JSON.stringify(rec)) await plugins.put(key, rec)
           }
           pulled++
         }
@@ -221,6 +235,19 @@ async function apply(ctx, config) {
         wmTs = last.updated_at_cursor
         wmId = last.id
         if (res.rows.length < config.syncBatchSize) break
+      }
+      if (pulled > 0) starOrder = null // star 分布变化，分位缓存失效重算
+
+      // sources：全量聚合拉取（plugin_sources 小表，含增删两向；仅变化行写入镜像）
+      const srcRes = await db.query(
+        `SELECT plugin_id, array_agg(source_id ORDER BY source_id) AS sources FROM plugin_sources GROUP BY plugin_id`,
+      )
+      const srcMap = new Map(srcRes.rows.map((r) => [r.plugin_id, r.sources ?? []]))
+      for (const [key, p] of plugins.entries()) {
+        const desired = srcMap.get(p.id) ?? []
+        if (JSON.stringify(p.sources ?? []) !== JSON.stringify(desired)) {
+          await plugins.update(key, (r) => ({ ...r, sources: desired }))
+        }
       }
 
       // events：单调 id 增量
@@ -292,6 +319,7 @@ async function apply(ctx, config) {
         lastSyncAt: new Date().toISOString(),
       })
       logger.info(`同步完成：plugins +${pulled}，events 游标 ${evCursor}，游标 (${wmTs}, ${wmId})`)
+      ctx.emit('plugin-repo/synced', { pulled })
     } finally {
       syncing = false
     }
@@ -310,6 +338,63 @@ async function apply(ctx, config) {
   }
 
   // -------------------------------------------------------------------------
+  // 客观分（契约 §7：PG 只存信号，分值为本机消费侧策略，非安全审计结论）
+  // -------------------------------------------------------------------------
+  const DEFAULT_WEIGHTS = { votes: 0.30, activity: 0.25, stars: 0.20, verified: 0.15, iconDoc: 0.10 }
+
+  /** 归一化权重（和不为 1 或全 0 时按比例缩放；和 ≤0 回退默认）。 */
+  function normalizeWeights(raw) {
+    const w = { ...DEFAULT_WEIGHTS, ...(raw ?? {}) }
+    const sum = w.votes + w.activity + w.stars + w.verified + w.iconDoc
+    if (!(sum > 0) || !Number.isFinite(sum)) return { ...DEFAULT_WEIGHTS }
+    const scaled = {}
+    for (const k of Object.keys(w)) scaled[k] = (w[k] ?? 0) / sum
+    return scaled
+  }
+
+  /** 该插件 star 在当前镜像全量中的分位（0-1，二分计数严格小于者）。 */
+  function starPercentile(stars) {
+    starOrder ??= [...plugins.entries()].map(([, p]) => p.stars).sort((a, b) => a - b)
+    if (starOrder.length === 0) return 0
+    let lo = 0
+    let hi = starOrder.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (starOrder[mid] < stars) lo = mid + 1
+      else hi = mid
+    }
+    return lo / starOrder.length
+  }
+
+  /**
+   * 单插件客观分 → { total: 0-100, parts }。
+   * 口径：共识票 = votes/7（当前满分，契约 §3）；维护活跃度 = lastPushAt 或最新
+   * npm 版本时间距今天数（30 天内满分 → 365 天线性衰减 → 之后 0，无数据 0）；
+   * star 分位 = 镜像内分位；源码验证 = sources 含 walkinglabs（契约 §3）；
+   * 图标文档 = 简介（中/英）非空近似（图标字段待发现器补齐）。
+   */
+  function scoreOf(plugin) {
+    const w = normalizeWeights(config.scoreWeights)
+    const votesPart = Math.min(plugin.consensusVotes ?? 0, 7) / 7
+    let ref = plugin.lastPushAt || ''
+    if (!ref && Array.isArray(plugin.npmVersions)) {
+      ref = plugin.npmVersions.find((v) => v?.time)?.time ?? ''
+    }
+    let activityPart = 0
+    if (ref) {
+      const days = (Date.now() - new Date(ref).getTime()) / 86400000
+      activityPart = days <= 30 ? 1 : days >= 365 ? 0 : 1 - (days - 30) / 335
+    }
+    const starsPart = starPercentile(plugin.stars ?? 0)
+    const verifiedPart = (plugin.sources ?? []).includes('walkinglabs') ? 1 : 0
+    const iconDocPart = (plugin.descZh || plugin.descEn) ? 1 : 0
+    const parts = { votes: votesPart, activity: activityPart, stars: starsPart, verified: verifiedPart, iconDoc: iconDocPart }
+    const total = Math.round((votesPart * w.votes + activityPart * w.activity + starsPart * w.stars
+      + verifiedPart * w.verified + iconDocPart * w.iconDoc) * 100)
+    return { total, parts }
+  }
+
+  // -------------------------------------------------------------------------
   // 只读模型工具 plugin_repo
   // -------------------------------------------------------------------------
   const clampLimit = (value, fallback = 20) => {
@@ -317,12 +402,16 @@ async function apply(ctx, config) {
     return Math.min(Math.max(n, 1), 50)
   }
 
-  // 排序键白名单：共识票（默认）/ star / 最近更新；非法值回退共识票
+  // 排序键白名单：共识票（默认）/ star / 最近更新 / 客观分；非法值回退共识票
   const SORTERS = {
     votes: (a, b) => b.consensusVotes - a.consensusVotes || b.stars - a.stars || a.id.localeCompare(b.id),
     stars: (a, b) => b.stars - a.stars || b.consensusVotes - a.consensusVotes || a.id.localeCompare(b.id),
     updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id),
+    score: (a, b) => scoreOf(b).total - scoreOf(a).total || b.consensusVotes - a.consensusVotes || a.id.localeCompare(b.id),
   }
+
+  /** 生效分类：本地覆盖优先，其次中心库分类（V2 起 search/categories 统一口径）。 */
+  const effectiveCategory = (p) => p.localCategoryId || p.categoryId
 
   function doSearch(args) {
     const text = (args.text ?? '').trim().toLowerCase()
@@ -332,7 +421,7 @@ async function apply(ctx, config) {
     const sorter = SORTERS[args.sort] ?? SORTERS.votes
     const matched = []
     for (const [, p] of plugins.entries()) {
-      if (category && p.categoryId !== category) continue
+      if (category && effectiveCategory(p) !== category) continue
       if (text) {
         const hay = `${p.name}\n${p.npm}\n${p.descZh}\n${p.descEn}`.toLowerCase()
         if (!text.split(/\s+/).every((word) => hay.includes(word))) continue
@@ -354,6 +443,9 @@ async function apply(ctx, config) {
         stars: p.stars,
         status: p.status,
         installSpec: p.installSpec,
+        objectiveScore: scoreOf(p).total,
+        labels: p.labels,
+        localCategoryId: p.localCategoryId,
       })),
     }
   }
@@ -377,6 +469,7 @@ async function apply(ctx, config) {
     return {
       found: true,
       plugin: p,
+      objectiveScore: scoreOf(p), // { total, parts }，自动计算口径见 scoreOf 注释
       ratingSummary: count > 0 ? { count, average: Math.round((sum / count) * 10) / 10 } : null,
       myRating: mine ? { score: mine.score, note: mine.note, synced: mine.synced } : null,
       recentEvents: related.slice(0, 5).map((e) => ({ kind: e.kind, detail: e.detail, at: e.at })),
@@ -386,7 +479,7 @@ async function apply(ctx, config) {
 
   function doCategories() {
     const counts = new Map()
-    for (const [, p] of plugins.entries()) counts.set(p.categoryId, (counts.get(p.categoryId) ?? 0) + 1)
+    for (const [, p] of plugins.entries()) counts.set(effectiveCategory(p), (counts.get(effectiveCategory(p)) ?? 0) + 1)
     return {
       items: [...categories.entries()].map(([id, c]) => ({
         id,
@@ -447,6 +540,51 @@ async function apply(ctx, config) {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 评分写路径（Remote 与 sync 补写共用）
+  // -------------------------------------------------------------------------
+  /** note 清洗（设计 §4）：去控制字符、trim、截断 500 字。 */
+  const sanitizeNote = (note) => String(note ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 500)
+
+  /** 单事务 set_config(app.scored_by) + upsert 本人行（RLS fail-closed）。 */
+  async function writeRatingToPg(rating) {
+    const client = await getPool().connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(`SELECT set_config('app.scored_by', $1, true)`, [rating.scoredBy])
+      await client.query(
+        `INSERT INTO ratings (plugin_id, scored_by, score, note, scored_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (plugin_id, scored_by)
+         DO UPDATE SET score = EXCLUDED.score, note = EXCLUDED.note, scored_at = EXCLUDED.scored_at`,
+        [rating.pluginId, rating.scoredBy, rating.score, rating.note, rating.scoredAt],
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
+  /** 单事务 set_config + DELETE 本人行。 */
+  async function deleteRatingFromPg(pluginId) {
+    const client = await getPool().connect()
+    try {
+      await client.query('BEGIN')
+      await client.query(`SELECT set_config('app.scored_by', $1, true)`, [config.scoredBy])
+      await client.query('DELETE FROM ratings WHERE plugin_id = $1 AND scored_by = $2', [pluginId, config.scoredBy])
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+
   /**
    * pluginRepo Remote 命名空间（客户端「仓库」标签的数据桥）。
    *
@@ -476,14 +614,169 @@ async function apply(ctx, config) {
     async updates(limit) {
       return doUpdates({ limit })
     }
+
+    /**
+     * 人工评分（本人行）：本地镜像先行（UI 立即生效），PG 在线时同事务
+     * set_config + upsert 成功后标 synced=true；离线/失败留队列由 sync 补写。
+     */
+    async rate(id, score, note) {
+      const fail = (code) => ({ ok: false, error: { code } })
+      if (!config.scoredBy) return fail('plugin-repo/scored-by-required')
+      const pid = String(id ?? '').trim().toLowerCase()
+      if (!plugins.get(sk(pid))) return fail('plugin-repo/not-found')
+      if (!Number.isSafeInteger(score) || score < 1 || score > 5) return fail('plugin-repo/invalid-score')
+      const cleanNote = sanitizeNote(note)
+      const key = sk(`${pid}|${config.scoredBy}`)
+      const rating = {
+        pluginId: pid,
+        scoredBy: config.scoredBy, // 只写本人行；scoredBy 即 config 来源，天然防串号
+        score,
+        note: cleanNote,
+        scoredAt: new Date().toISOString(),
+        synced: false,
+      }
+      await ratings.put(key, rating)
+      let synced = false
+      if (config.databaseUrl) {
+        try {
+          await writeRatingToPg(rating)
+          await ratings.update(key, (r) => ({ ...r, synced: true }))
+          synced = true
+        } catch (error) {
+          // 离线/写失败：本地 synced=false 保留，下一轮 sync 的 pending 补写（V0 机制）
+          logger.warn(`评分写 PG 失败，已落本地队列待补写：${String(error?.message ?? error)}`)
+        }
+      }
+      ctx.emit('plugin-repo/rating-changed', { id: pid })
+      return { ok: true, rating: { ...rating, synced } }
+    }
+
+    /** 删除本人评分：本地删除 + PG DELETE 本人行（离线删已同步行接受下次拉取回弹，既定取舍）。 */
+    async unrate(id) {
+      const fail = (code) => ({ ok: false, error: { code } })
+      if (!config.scoredBy) return fail('plugin-repo/scored-by-required')
+      const pid = String(id ?? '').trim().toLowerCase()
+      const key = sk(`${pid}|${config.scoredBy}`)
+      const existed = Boolean(ratings.get(key))
+      if (existed) await ratings.delete(key)
+      if (config.databaseUrl) {
+        try {
+          await deleteRatingFromPg(pid)
+        } catch (error) {
+          logger.warn(`删除 PG 评分失败（本地已删）：${String(error?.message ?? error)}`)
+        }
+      }
+      ctx.emit('plugin-repo/rating-changed', { id: pid })
+      return { ok: true, deleted: existed }
+    }
+
+    // -----------------------------------------------------------------------
+    // V2：本地分类与 labels 管理（只写本机域，不进 PG；契约 §5 local- 前缀豁免）
+    // -----------------------------------------------------------------------
+
+    /** 写插件 labels：去重去空白，≤8 个、每个 ≤24 字。 */
+    async setLabels(id, labels) {
+      const fail = (code) => ({ ok: false, error: { code } })
+      const pid = String(id ?? '').trim().toLowerCase()
+      const key = sk(pid)
+      if (!plugins.get(key)) return fail('plugin-repo/not-found')
+      if (!Array.isArray(labels)) return fail('plugin-repo/invalid-labels')
+      const clean = [...new Set(labels.map((l) => String(l ?? '').trim()).filter((l) => l.length > 0 && l.length <= 24))].slice(0, 8)
+      await plugins.update(key, (r) => ({ ...r, labels: clean }))
+      ctx.emit('plugin-repo/local-changed', { kind: 'labels', id: pid })
+      return { ok: true, labels: clean }
+    }
+
+    /** 本地分类覆盖：categoryId 须为已存在 local- 分类或 ''（清除覆盖=跟随中心库）。 */
+    async setLocalCategory(id, categoryId) {
+      const fail = (code) => ({ ok: false, error: { code } })
+      const pid = String(id ?? '').trim().toLowerCase()
+      const key = sk(pid)
+      if (!plugins.get(key)) return fail('plugin-repo/not-found')
+      const target = String(categoryId ?? '').trim()
+      if (target !== '' && (!target.startsWith('local-') || !categories.get(target))) return fail('plugin-repo/invalid-category')
+      await plugins.update(key, (r) => ({ ...r, localCategoryId: target }))
+      ctx.emit('plugin-repo/local-changed', { kind: 'category', id: pid })
+      return { ok: true, localCategoryId: target }
+    }
+
+    /** 新增本地分类：local-<slug>，中文名必填（≤30 字），重名报错。 */
+    async addCategory(titleZh, titleEn) {
+      const fail = (code) => ({ ok: false, error: { code } })
+      const zh = String(titleZh ?? '').trim()
+      const en = String(titleEn ?? '').trim()
+      if (!zh || zh.length > 30 || en.length > 60) return fail('plugin-repo/invalid-category-title')
+      const base = (en || zh).toLowerCase().replace(/[^a-z0-9一-鿿]+/g, '-').replace(/^-+|-+$/g, '') || 'custom'
+      let cid = `local-${base}`
+      for (let i = 2; categories.get(cid); i++) cid = `local-${base}-${i}` // 重名自动加序号
+      await categories.put(cid, { id: cid, titleZh: zh, titleEn: en, builtin: false })
+      ctx.emit('plugin-repo/local-changed', { kind: 'category-added', id: cid })
+      return { ok: true, categoryId: cid }
+    }
+
+    /** 删除本地分类（仅 local- 前缀），并清空各插件对它的覆盖引用。 */
+    async removeCategory(id) {
+      const fail = (code) => ({ ok: false, error: { code } })
+      const cid = String(id ?? '').trim()
+      if (!cid.startsWith('local-')) return fail('plugin-repo/builtin-category-readonly')
+      if (!categories.get(cid)) return fail('plugin-repo/not-found')
+      for (const [key, p] of plugins.entries()) {
+        if (p.localCategoryId === cid) await plugins.update(key, (r) => ({ ...r, localCategoryId: '' }))
+      }
+      await categories.delete(cid)
+      ctx.emit('plugin-repo/local-changed', { kind: 'category-removed', id: cid })
+      return { ok: true }
+    }
+
+    /**
+     * 已安装 bundle 与仓库镜像的合并读（V2「已安装」子视图）。
+     * 动作（启停/删除/安装）由客户端直调官方 remote.pluginManager，本方法只读。
+     * 关联口径：npm 包名优先，其次条目名/id 小写匹配。
+     */
+    async installed() {
+      const pm = ctx.get('pluginManager')
+      if (!pm || typeof pm.listBundles !== 'function') {
+        return { ok: false, error: { code: 'plugin-repo/plugin-manager-unavailable' } }
+      }
+      const bundles = await pm.listBundles()
+      const byNpm = new Map()
+      const byName = new Map()
+      for (const [, p] of plugins.entries()) {
+        if (p.npm) byNpm.set(p.npm, p)
+        byName.set(p.id, p)
+        byName.set(String(p.name).toLowerCase(), p)
+      }
+      const items = (Array.isArray(bundles) ? bundles : []).map((b) => {
+        const hit = byNpm.get(b.name) ?? byName.get(String(b.name ?? '').toLowerCase()) ?? null
+        return {
+          name: b.name ?? '',
+          version: b.version ?? '',
+          enabled: b.enabled !== false,
+          installed: b.installed === true,
+          official: b.official === true,
+          removable: b.removable !== false,
+          readOnlyReason: b.readOnlyReason ?? '',
+          error: b.error ? { code: b.error.code ?? '', diagnostic: b.error.diagnostic ?? '' } : null,
+          metaTitle: b.meta?.title?.en ?? '',
+          inRepo: Boolean(hit),
+          repoId: hit?.id ?? '',
+          repoDesc: hit ? (hit.descZh || hit.descEn) : '',
+          repoCategoryId: hit ? (hit.localCategoryId || hit.categoryId) : '',
+          objectiveScore: hit ? scoreOf(hit).total : null,
+          consensusVotes: hit?.consensusVotes ?? null,
+        }
+      })
+      return { ok: true, items }
+    }
   }
   Object.defineProperty(PluginRepoRemote.prototype, '@deepseek-ai/dsh-typert-protocol/remote-methods', {
     configurable: true,
     value: Object.freeze({
       version: 1,
       methods: Object.freeze(
-        ['search', 'entry', 'categories', 'updates'].map((m) =>
-          Object.freeze({ method: m, invocation: Object.freeze({ kind: 'direct' }) }))),
+        ['search', 'entry', 'categories', 'updates', 'rate', 'unrate',
+          'setLabels', 'setLocalCategory', 'addCategory', 'removeCategory', 'installed']
+          .map((m) => Object.freeze({ method: m, invocation: Object.freeze({ kind: 'direct' }) }))),
     }),
   })
   ctx.plugin(PluginRepoRemote)

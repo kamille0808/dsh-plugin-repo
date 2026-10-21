@@ -28,6 +28,10 @@ dsh plugin --profile web add /abs/path/to/dsh-plugin-repo
 | `syncIntervalSeconds` | `600` | 同步循环间隔（≥60） |
 | `syncBatchSize` | `500` | 单批拉取行数 |
 | `githubToken` | `''` | 可选 PAT，仅用于 `check` 动作的即席核验 |
+| `scoreWeights` | 见下 | 客观分五分项权重（0-1，和不为 1 时自动归一化）；改权重只影响本机展示，非安全审计结论 |
+
+`scoreWeights` 默认：`votes: 0.30 / activity: 0.25 / stars: 0.20 / verified: 0.15 / iconDoc: 0.10`
+（共识票 / 维护活跃度 / star 分位 / 源码验证标记 / 图标文档——V1 以简介非空近似）。
 
 ## 模型工具 plugin_repo（只读）
 

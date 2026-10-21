@@ -1,12 +1,19 @@
-# DSH 插件仓库 · 数据契约 v0.2
+# DSH 插件仓库 · 数据契约 v0.3
 
 > 本文件是「发现器（Harvester）」与「dsh-plugin-repo 插件」之间的**唯一接口**。
 > 任何一端只依赖本契约与 `migrations/` 的 DDL，不依赖对方实现。
-> 契约变更流程见 §9。配套 DDL：`migrations/0000_roles.sql`、`migrations/0001_init.sql`、`migrations/0002_harvester_signals.sql`。
+> 契约变更流程见 §9。配套 DDL：`migrations/0000_roles.sql`、`migrations/0001_init.sql`、`migrations/0002_ratings_delete_own.sql`、`migrations/0003_harvester_signals.sql`。
 >
 > 变更记录：
-> - **v0.2**（minor，发现器侧提案）：`plugins` 加 `git_commit`（format-1 git 源所需）、`plugin_checks` 加 `miss_streak`（gone 判定）；§8 索引字段口径改按官方 `parseMarketIndex` 表述。表结构见 `0002_harvester_signals.sql`，major 未变，插件侧无需同步发布。
+> - **v0.3**（minor，发现器侧提案）：`plugins` 加 `git_commit`（format-1 git 源所需）、`plugin_checks` 加 `miss_streak`（gone 判定）；§8 索引字段口径改按官方 `parseMarketIndex` 表述。表结构见 `0003_harvester_signals.sql`，major 未变，插件侧无需同步发布。
+> - **v0.2**（minor，插件侧提案）：`ratings` 授予 DELETE 权限并新增 `ratings_delete_own` 策略（仍受 RLS 限制，只能删本人行）。见 `0002_ratings_delete_own.sql`，major 未变，插件侧无需同步发布。
 > - v0.1：初版。
+>
+> > **关于版本号**：v0.2 与 v0.3 是两端**各自独立**提出的 minor 变更（契约 §9 允许任一端提案）。
+> > 合并时按「先发布者为低版本」排序：插件侧的 `0002_ratings_delete_own.sql` 已先行发布，占 v0.2；
+> > 发现器的信号列增量顺延为 v0.3，迁移文件相应命名为 `0003_harvester_signals.sql`
+> > （该文件在合并前从未发布过，重命名不违反「不改已发布文件」）。
+> > 两处 minor 互不冲突，可独立应用；契约版本最终为 `{"major": 0, "minor": 3}`。
 
 ---
 
@@ -105,6 +112,7 @@
   - `scored_by` 命名：`<host>-<user>`，小写，仅 `[a-z0-9-]`（如 `mbp-dennis`）；
   - 插件连接后执行 `SET app.scored_by = '<本机标识>'`，RLS 强制只能 INSERT/UPDATE 本人行；未设置时全部拒绝（fail-closed）；
   - 冲突语义：同键 upsert，后写赢（同一人改自己的分，无他人覆盖问题）；
+  - 删除（v0.2）：插件可删除本人行（`GRANT DELETE` + `ratings_delete_own` 策略，RLS 同样限本人行）；
   - 离线：先落本地队列（`synced=false`），恢复后补写；
   - 展示：各人的分并存，可聚合均分/分布；均分仅为参考，固定标注「非安全审计结论」。
 
@@ -121,7 +129,13 @@
 
 ## 9. 契约版本与变更流程
 
-- 版本存 `harvester_state.contract_version`：`{"major": 0, "minor": 1}`。
+- 版本存 `harvester_state.contract_version`：`{"major": 0, "minor": 3}`。
 - **minor**（加列、加表、加枚举值、加 source_id）：任一端可提案，写入 migrations 新文件并升 minor，对端无需同步发布。
 - **major**（改语义、删列、改水印/评分协议）：必须两端评审通过后同时升级；发现器先写库升 major，插件校验不通过时降级为只读并提示。
 - 迁移脚本一律新增文件（`0002_*.sql`…），不改已发布文件；脚本幂等。
+- **两端并行提 minor 时的版本号分配**：按「先发布者为低版本」排序，后发布者顺延，
+  迁移文件编号同步顺延（避免两个 `0002_*`）。合并后的版本号取最高者。
+  本仓库当前的两个 minor（v0.2 插件侧 / v0.3 发现器侧）即按此处理。
+- 插件侧只校验 major（见 §5.6 与 `dsh-plugin-repo/lib/index.js`），因此 minor 升版
+  **不需要插件同步发版**；但插件的 `contract_version` 读取需要 `harvester_state` 有权限，
+  这一点在 `0000_roles.sql` / `0001_init.sql` 里已就位。
