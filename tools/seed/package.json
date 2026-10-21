@@ -1,0 +1,12 @@
+{
+  "name": "dsh-plugin-repo-seed",
+  "version": "0.1.0",
+  "private": true,
+  "description": "把调研归档的 catalog.json（6084 条，CC0）导入 PostgreSQL dev/prod 库的种子脚本；也是发现器 L0 阶段的参考实现",
+  "type": "module",
+  "main": "seed.mjs",
+  "license": "MIT",
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Plugin Repository",
+    "description": "Browse and search the community DSH plugin catalog synced from the central PostgreSQL repository; read-only plugin_repo tool for the agent."
+  }
+}

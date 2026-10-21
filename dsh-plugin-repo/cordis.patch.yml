@@ -1,0 +1,5 @@
+# DSH 插件仓库：PG 中心库增量同步 + plugin_repo 只读工具。
+# 数据契约见 contract/CONTRACT.md（v0.1）。
+- insert:
+    - id: plugin-repo
+      name: dsh-plugin-repo

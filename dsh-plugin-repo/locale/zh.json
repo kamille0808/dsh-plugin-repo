@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "插件仓库",
+    "description": "从 PostgreSQL 中心库增量同步社区插件目录，为 Agent 提供只读的 plugin_repo 检索工具。"
+  }
+}
