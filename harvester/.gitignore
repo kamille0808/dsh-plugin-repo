@@ -8,3 +8,6 @@ dist/
 *.env.local
 secrets.env
 .secrets/
+
+# 离线模式的本地状态（发布守门基线）
+.harvester-state.json

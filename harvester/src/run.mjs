@@ -14,7 +14,7 @@ import { createPool, withTransaction, loadCatalog, readContractVersion, upsertPl
 import { HttpClient } from './http.mjs'
 import { mergeCandidates, applyAdmissionGate, persistCandidates, applyVerification } from './catalog.mjs'
 import { fetchSource, searchGithubTopic, searchNpmKeywords, verifyPlugin } from './collect.mjs'
-import { readState, writeState, readSourceSnapshot, writeSourceSnapshot, readCursor, writeCursor, writeLastRun } from './state.mjs'
+import { readState, writeState, readSourceSnapshot, writeSourceSnapshot, readCursor, writeCursor, writeLastRun, readLocalState, writeLocalState } from './state.mjs'
 import { renderMarketIndex } from './render-index.mjs'
 import { buildBrowseData, renderBrowsePage } from './render-page.mjs'
 import { publish, shouldPublish } from './publish.mjs'
@@ -199,14 +199,14 @@ export async function runOffline(config, options = {}) {
     errors: 0,
   }
 
-  const http = new HttpClient({
+  const http = options.http ?? new HttpClient({
     userAgent: config.userAgent,
     githubToken: config.githubToken,
     timeoutMs: config.httpTimeoutMs,
     retries: config.httpRetries,
     concurrency: config.httpConcurrency,
   })
-  http.npmRatePerHour = config.npmRatePerMinute * 60
+  if (!options.http) http.npmRatePerHour = config.npmRatePerMinute * 60
 
   const collected = await collectAllSources(http, config, summary)
   const candidates = mergeCandidates(collected, config.categories.alias ?? {}, config.knownCategories)
@@ -244,11 +244,36 @@ export async function runOffline(config, options = {}) {
   validateIndex(index, indexUrl)
 
   const page = renderBrowsePage(buildBrowseData(catalog, { limit: config.browseLimit }), { generatedAt: new Date().toISOString() })
+
+  // 守门：离线路径同样不允许用残缺索引覆盖完整索引。
+  // 线上路径的基线在 PG 的 harvester_state 里；离线不连库，用本地状态文件兜底。
+  const previousSize = Number(await readLocalState('catalog-size', 0)) || 0
+  const currentSize = summary.candidates
+  const gate = shouldPublish({ previousSize, currentSize, maxCatalogDrop: config.maxCatalogDrop })
+  if (!gate.publish) {
+    summary.published = {
+      target: '(已跳过：本轮信源大面积失败，避免用残缺索引覆盖完整索引)',
+      written: [],
+    }
+    summary.publishSkipped = true
+    summary.catalogDrop = { previous: previousSize, current: currentSize, ratio: Number(gate.dropRatio.toFixed(3)) }
+    log.warn('信源大面积失败，跳过本轮发布', {
+      previous: previousSize,
+      current: currentSize,
+      dropRatio: Number(gate.dropRatio.toFixed(3)),
+      threshold: config.maxCatalogDrop,
+      failedSources: summary.sources.failed.map((s) => s.source_id),
+    })
+    summary.durationMs = Date.now() - startedMs
+    return summary
+  }
+
   const published = await publish(config, new Map([
     ['index.json', JSON.stringify(index, null, 2)],
     ['index.html', page],
   ]))
   summary.published = published
+  await writeLocalState('catalog-size', currentSize)
   summary.durationMs = Date.now() - startedMs
   return summary
 }

@@ -274,7 +274,16 @@ server {
 所以发布前会比对候选数相对上一轮的跌幅：超过 `HARVESTER_MAX_CATALOG_DROP`
 （默认 40%）就**跳过本轮发布**，只记一条警告到运行摘要。判定口径与 vbarter
 注册表自己的做法一致（「published 数量比上一版下降超过 40% 就中止写入」）。
-上一轮的候选数存在 `harvester_state` 的 `catalog-size` 键。
+
+**两条路径都有守门**：
+
+| 路径 | 基线存哪 |
+| --- | --- |
+| `run`（连库，线上） | PG 的 `harvester_state` 的 `catalog-size` 键 |
+| `collect`（离线，不连库） | 本地文件 `harvester/.harvester-state.json`（gitignored） |
+
+离线路径原本没有守门——一次信源大面积失败的离线运行，把 3490 条的完整索引
+直接覆盖成了 767 条，正是守门要拦的那种静默回退。
 
 注意这只挡**发布**；PG 里的数据照常写（源快照也照常更新），所以信源恢复后
 下一轮自然回到正常水平。
@@ -300,6 +309,7 @@ server {
 | `GITHUB_TOKEN` / `GH_TOKEN` | 空 | 只读 PAT；匿名 60 次/小时不够 L4 用 |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | npm registry |
 | `HARVESTER_SECRETS_FILE` | `harvester/.env.local` | 本地凭据文件路径（gitignored） |
+| `HARVESTER_LOCAL_STATE_FILE` | `harvester/.harvester-state.json` | 离线模式的本地状态文件（发布守门基线，gitignored） |
 | `HARVESTER_HTTP_TIMEOUT_MS` | `30000` | 单次请求超时 |
 | `HARVESTER_HTTP_RETRIES` | `3` | 退避重试次数 |
 | `HARVESTER_HTTP_CONCURRENCY` | `4` | 并发上限 |
@@ -388,11 +398,11 @@ CI 的环境变量/密钥管理。
 
 ### 已验证
 
-- **55 项单测通过**（`node --test test/*.test.mjs`，逐个列文件名）：
+- **62 项单测通过**（`node --test test/*.test.mjs`，逐个列文件名）：
   归一化与契约 id、入库门槛、信源解析（markdown 清单 / 表格行 / format-1 索引 /
   vbarter 注册表）、索引渲染与官方校验、失败降级规则、发布守门、
   本地凭据文件（解析 / 优先级 / 写入 / 脱敏）、nginx 发布路径（原子替换 /
-  不留临时文件 / 未知 publisher 报错）。
+  不留临时文件 / 未知 publisher 报错 / 回源自检）、离线发布守门。
 - **对 8 个真实信源跑通离线全链路**（`node src/cli.mjs collect`）：抓取 → 归一化 →
   门槛 → 渲染 → 官方 `parseMarketIndex` 自验 → 产出 `dist/index.json` + `dist/index.html`。
   实测一轮：8 个信源全部成功、0 错误、21863 个去重候选、3490 条进索引，

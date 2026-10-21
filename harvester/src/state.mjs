@@ -8,6 +8,9 @@
  *   cursor:<name>   —— 各层游标（L4 核验批次、候选池翻页）
  */
 import { log } from './log.mjs'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import path from 'node:path'
+import { ROOT } from './config.mjs'
 
 export async function readState(client, key, fallback = null) {
   const { rows } = await client.query('SELECT value FROM harvester_state WHERE key = $1', [key])
@@ -55,4 +58,44 @@ export async function writeLastRun(client, summary) {
     events: summary.events,
     errors: summary.errors,
   })
+}
+
+// ---------------------------------------------------------------------------
+// 本地状态文件（离线模式用）
+// ---------------------------------------------------------------------------
+
+/**
+ * 离线模式（collect）不连库，没有 harvester_state 可存发布守门的基线。
+ * 用一个本地 JSON 文件兜底：记录上一轮发布的候选数。
+ *
+ * 这不是「多一套状态」——线上路径（run）的基线仍然在 PG 里，
+ * 这里只是让离线路径也别把完整索引覆盖成残缺索引。
+ */
+export function localStatePath() {
+  return process.env.HARVESTER_LOCAL_STATE_FILE
+    ? path.resolve(process.env.HARVESTER_LOCAL_STATE_FILE)
+    : path.join(ROOT, '.harvester-state.json')
+}
+
+async function readLocalStateAll() {
+  try {
+    return JSON.parse(await readFile(localStatePath(), 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return {}
+    return {}
+  }
+}
+
+export async function readLocalState(key, fallback = null) {
+  const all = await readLocalStateAll()
+  return all[key] ?? fallback
+}
+
+export async function writeLocalState(key, value) {
+  const all = await readLocalStateAll()
+  all[key] = value
+  const file = localStatePath()
+  await mkdir(path.dirname(file), { recursive: true })
+  await writeFile(file, `${JSON.stringify(all, null, 2)}\n`, 'utf8')
+  return file
 }
