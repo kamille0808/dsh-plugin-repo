@@ -44,10 +44,13 @@ window.__ModuleLoader__.load({
 		var import_dsh_client_store = require("@deepseek-ai/dsh-client-store");
 		var import_jsx_runtime2 = require("react/jsx-runtime");
 		var NS = "pluginRepo";
-		var inject = ["slots", "locale", "connection"];
+		var inject = ["slots", "locale", "connection", "remote"];
 		var PAGE_SIZE = 24;
 		var zh = {
 		  title: "\u4ED3\u5E93",
+		  viewBrowse: "\u6D4F\u89C8\u4ED3\u5E93",
+		  viewInstalled: "\u5DF2\u5B89\u88C5",
+		  viewCategories: "\u5206\u7C7B\u7BA1\u7406",
 		  searchPlaceholder: "\u641C\u7D22\u63D2\u4EF6\u540D\u79F0 / npm \u5305\u540D / \u7B80\u4ECB",
 		  allCategories: "\u5168\u90E8\u5206\u7C7B",
 		  sortVotes: "\u5171\u8BC6\u7968\u6392\u5E8F",
@@ -90,12 +93,49 @@ window.__ModuleLoader__.load({
 		  installSpecLabel: "\u5B89\u88C5 spec",
 		  copySpec: "\u590D\u5236 spec",
 		  copied: "\u5DF2\u590D\u5236",
-		  installHint: "V0 \u4E0D\u76F4\u63A5\u5B89\u88C5\uFF1A\u590D\u5236 spec \u540E\u5230\u300C\u5DF2\u5B89\u88C5\u300D\u9875\u8D70 plugin_manager \u5BA1\u6279\u94FE\u5B89\u88C5",
+		  installNow: "\u5B89\u88C5",
+		  installing: "\u5B89\u88C5\u4E2D\u2026",
+		  installApplied: "\u5DF2\u5B89\u88C5\u5E76\u542F\u7528",
+		  installRestart: "\u5DF2\u5B89\u88C5\uFF0C\u91CD\u542F\u540E\u751F\u6548",
+		  installFailed: "\u5B89\u88C5\u5931\u8D25",
+		  installHint: "\u5B89\u88C5\u52A8\u4F5C\u7ECF pluginManager \u6267\u884C\uFF0C\u4FDD\u7559\u5176\u5BA1\u6279\u4E0E\u56DE\u6EDA\uFF1B\u5931\u8D25\u53EF\u6539\u7528\u590D\u5236\u7684 spec \u5230\u300C\u5DF2\u5B89\u88C5\u300D\u9875\u64CD\u4F5C",
 		  snapshotNote: "\u6570\u636E\u6765\u81EA\u672C\u5730\u955C\u50CF\u5FEB\u7167\uFF08\u79BB\u7EBF\u53EF\u8BFB\uFF09",
-		  errorPrefix: "\u8C03\u7528\u5931\u8D25"
+		  errorPrefix: "\u8C03\u7528\u5931\u8D25",
+		  labelsTitle: "\u6807\u7B7E",
+		  labelsPlaceholder: "\u56DE\u8F66\u6DFB\u52A0\u6807\u7B7E\uFF08\u22648 \u4E2A\uFF09",
+		  localCategoryTitle: "\u672C\u5730\u5206\u7C7B",
+		  followCentral: "\u8DDF\u968F\u4E2D\u5FC3\u5E93",
+		  installedEmpty: "\u672C profile \u6CA1\u6709\u5DF2\u5B89\u88C5\u7684\u5916\u90E8 bundle",
+		  installedLoading: "\u6B63\u5728\u8BFB\u53D6\u5DF2\u5B89\u88C5\u5217\u8868",
+		  notInRepo: "\u4E0D\u5728\u4ED3\u5E93\u955C\u50CF",
+		  enabledTag: "\u5DF2\u542F\u7528",
+		  disabledTag: "\u5DF2\u505C\u7528",
+		  enableBtn: "\u542F\u7528",
+		  disableBtn: "\u505C\u7528",
+		  removeBtn: "\u79FB\u9664",
+		  removeConfirm: "\u786E\u8BA4\u79FB\u9664\u8BE5 bundle\uFF1F\u79FB\u9664\u4F1A\u5378\u8F7D\u5176\u5168\u90E8\u63D2\u4EF6\u884C",
+		  officialTag: "\u5B98\u65B9",
+		  viewInRepo: "\u4ED3\u5E93\u8BE6\u60C5",
+		  catBuiltin: "\u5185\u7F6E\u5206\u7C7B\uFF08\u53EA\u8BFB\uFF09",
+		  catLocal: "\u672C\u5730\u5206\u7C7B",
+		  catAddPlaceholderZh: "\u65B0\u5206\u7C7B\u4E2D\u6587\u540D",
+		  catAddPlaceholderEn: "\u82F1\u6587\u540D\uFF08\u53EF\u9009\uFF09",
+		  catAddBtn: "\u65B0\u589E\u5206\u7C7B",
+		  catDelete: "\u5220\u9664",
+		  catDeleteConfirm: "\u5220\u9664\u8BE5\u672C\u5730\u5206\u7C7B\uFF1F\u5176\u4E2D\u63D2\u4EF6\u5C06\u56DE\u9000\u5230\u4E2D\u5FC3\u5E93\u5206\u7C7B",
+		  catEmpty: "\u6682\u65E0\u672C\u5730\u5206\u7C7B",
+		  catMembers: "\u8BE5\u5206\u7C7B\u4E0B\u7684\u63D2\u4EF6",
+		  catMembersEmpty: "\u8BE5\u5206\u7C7B\u4E0B\u6682\u65E0\u63D2\u4EF6",
+		  catMoveOut: "\u79FB\u51FA",
+		  catInvalidTitle: "\u4E2D\u6587\u540D\u5FC5\u586B\u4E14 \u226430 \u5B57",
+		  pmUnavailable: "pluginManager \u670D\u52A1\u4E0D\u53EF\u7528\uFF08\u5F53\u524D profile \u4E0D\u652F\u6301\u63D2\u4EF6\u7BA1\u7406\uFF09",
+		  pmActionFailed: "\u64CD\u4F5C\u5931\u8D25"
 		};
 		var en = {
 		  title: "Repository",
+		  viewBrowse: "Browse",
+		  viewInstalled: "Installed",
+		  viewCategories: "Categories",
 		  searchPlaceholder: "Search plugin name / npm package / description",
 		  allCategories: "All categories",
 		  sortVotes: "Sort by consensus votes",
@@ -138,9 +178,43 @@ window.__ModuleLoader__.load({
 		  installSpecLabel: "Install spec",
 		  copySpec: "Copy spec",
 		  copied: "Copied",
-		  installHint: "V0 does not install directly: copy the spec and install via the Installed tab (plugin_manager keeps its approval)",
+		  installNow: "Install",
+		  installing: "Installing\u2026",
+		  installApplied: "Installed and enabled",
+		  installRestart: "Installed; takes effect after restart",
+		  installFailed: "Installation failed",
+		  installHint: "Installation runs through pluginManager with its approval and rollback; on failure, copy the spec and use the Installed page",
 		  snapshotNote: "Data comes from the local mirror snapshot (readable offline)",
-		  errorPrefix: "Call failed"
+		  errorPrefix: "Call failed",
+		  labelsTitle: "Labels",
+		  labelsPlaceholder: "Press Enter to add a label (max 8)",
+		  localCategoryTitle: "Local category",
+		  followCentral: "Follow central catalog",
+		  installedEmpty: "No external bundles installed in this profile",
+		  installedLoading: "Reading installed bundles",
+		  notInRepo: "Not in repository mirror",
+		  enabledTag: "Enabled",
+		  disabledTag: "Disabled",
+		  enableBtn: "Enable",
+		  disableBtn: "Disable",
+		  removeBtn: "Remove",
+		  removeConfirm: "Remove this bundle? All its plugin rows will be unloaded",
+		  officialTag: "Official",
+		  viewInRepo: "Open in repository",
+		  catBuiltin: "Built-in categories (read-only)",
+		  catLocal: "Local categories",
+		  catAddPlaceholderZh: "New category name (zh)",
+		  catAddPlaceholderEn: "English name (optional)",
+		  catAddBtn: "Add category",
+		  catDelete: "Delete",
+		  catDeleteConfirm: "Delete this local category? Its plugins fall back to the central category",
+		  catEmpty: "No local categories yet",
+		  catMembers: "Plugins in this category",
+		  catMembersEmpty: "No plugins in this category",
+		  catMoveOut: "Move out",
+		  catInvalidTitle: "Chinese name required, \u226430 chars",
+		  pmUnavailable: "pluginManager service unavailable (this profile cannot manage plugins)",
+		  pmActionFailed: "Action failed"
 		};
 		var INITIAL = {
 		  status: "idle",
@@ -158,7 +232,26 @@ window.__ModuleLoader__.load({
 		  // idle | loading | error
 		  rateError: null,
 		  // rate/unrate 失败的 {code, message}（null = 无）
-		  rateBusy: false
+		  rateBusy: false,
+		  // ---- V2 ----
+		  view: "browse",
+		  // browse | installed | categories
+		  bundles: null,
+		  // installed() 合并读结果 items
+		  bundlesStatus: "idle",
+		  // idle | loading | ready | error
+		  bundlesError: null,
+		  pmBusy: "",
+		  // 进行中的 bundle 名（按钮禁用）
+		  pmResult: null,
+		  // {action, application|code, diagnostic?, target} 操作结果条
+		  newCatZh: "",
+		  newCatEn: "",
+		  catBusy: false,
+		  catError: null,
+		  catMembers: null,
+		  // {categoryId, items}
+		  labelDraft: ""
 		};
 		var RepoController = class {
 		  constructor(ctx) {
@@ -182,6 +275,14 @@ window.__ModuleLoader__.load({
 		  async call(method, args) {
 		    try {
 		      return await this.ctx.connection.rpc.call("/api", `pluginRepo/${method}`, { args });
+		    } catch (error) {
+		      return { ok: false, error: { code: "transport", message: String(error?.message ?? error) } };
+		    }
+		  }
+		  /** 动态调用官方 pluginManager Remote（安装/启停/删除走它，保留官方审批链）。 */
+		  async callPm(method, args) {
+		    try {
+		      return await this.ctx.connection.rpc.call("/api", `pluginManager/${method}`, { args });
 		    } catch (error) {
 		      return { ok: false, error: { code: "transport", message: String(error?.message ?? error) } };
 		    }
@@ -236,7 +337,30 @@ window.__ModuleLoader__.load({
 		      },
 		      removeRating: (id) => {
 		        void this.deleteRating(id);
-		      }
+		      },
+		      // ---- V2 动作 ----
+		      setView: (view) => {
+		        this.patch({ view });
+		        if (view === "installed" && this.state().bundlesStatus === "idle") void this.loadBundles();
+		        if (view === "categories") void this.loadCategories();
+		      },
+		      refreshBundles: () => void this.loadBundles(),
+		      toggleBundle: (name, enabled) => void this.toggleBundle(name, enabled),
+		      removeBundle: (name) => void this.removeBundle(name),
+		      installSpec: (spec) => void this.installSpec(spec),
+		      openEntryByRepoId: (id) => {
+		        this.patch({ view: "browse" });
+		        void this.loadEntry(id);
+		      },
+		      editNewCategory: (patch) => this.patch(patch),
+		      addCategory: () => void this.addCategory(),
+		      removeCategory: (id) => void this.removeCategory(id),
+		      openCategoryMembers: (id) => void this.openCategoryMembers(id),
+		      moveOutOfCategory: (id) => void this.moveOutOfCategory(id),
+		      editLabelDraft: (labelDraft) => this.patch({ labelDraft }),
+		      addLabel: (id, label) => void this.addLabel(id, label),
+		      removeLabel: (id, label) => void this.removeLabel(id, label),
+		      setLocalCategory: (id, categoryId) => void this.setLocalCategory(id, categoryId)
 		    };
 		  }
 		  async loadCategories() {
@@ -306,7 +430,119 @@ window.__ModuleLoader__.load({
 		      this.patch({ detailStatus: "error" });
 		      return;
 		    }
-		    this.patch({ detail: answer.value, detailStatus: "ready" });
+		    this.patch({ detail: answer.value, detailStatus: "ready", labelDraft: "" });
+		  }
+		  // ---------------------------------------------------------------------------
+		  // V2：已安装管理（读走本插件 installed 合并读；写动作直调官方 pluginManager）
+		  // ---------------------------------------------------------------------------
+		  async loadBundles() {
+		    this.patch({ bundlesStatus: "loading" });
+		    const answer = await this.call("installed", {});
+		    if (this.disposed) return;
+		    if (!answer.ok || !answer.value?.ok) {
+		      this.patch({ bundlesStatus: "error", bundlesError: answer.ok ? answer.value?.error : answer.error });
+		      return;
+		    }
+		    this.patch({ bundlesStatus: "ready", bundles: answer.value.items ?? [], bundlesError: null });
+		  }
+		  /** 启停/删除/安装动作统一出口：记录结果条并重拉已安装列表。 */
+		  async pmAction(action, name, answerPromise) {
+		    this.patch({ pmBusy: name, pmResult: null });
+		    const answer = await answerPromise;
+		    if (this.disposed) return;
+		    this.patch({ pmBusy: "" });
+		    if (!answer.ok) {
+		      this.patch({ pmResult: { action, application: "failed", diagnostic: answer.error?.message ?? answer.error?.code ?? "", target: name } });
+		      return;
+		    }
+		    const v = answer.value ?? {};
+		    this.patch({
+		      pmResult: {
+		        action,
+		        application: v.application ?? (v.error ? "failed" : "applied"),
+		        diagnostic: v.error?.diagnostic ?? v.error?.code ?? "",
+		        target: v.target ?? name
+		      }
+		    });
+		    await this.loadBundles();
+		  }
+		  toggleBundle(name, enabled) {
+		    return this.pmAction(enabled ? "enable" : "disable", name, this.callPm("setBundleEnabled", { name, enabled }));
+		  }
+		  removeBundle(name) {
+		    return this.pmAction("remove", name, this.callPm("removeBundle", { name }));
+		  }
+		  /** 详情页直接安装：requestId 追踪，installBundle 结算后展示 application 状态。 */
+		  installSpec(spec) {
+		    const requestId = `repo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		    return this.pmAction("install", spec, this.callPm("installBundle", { spec, options: { requestId } }));
+		  }
+		  // ---------------------------------------------------------------------------
+		  // V2：分类与 labels（本地私有，宿主只写本机域）
+		  // ---------------------------------------------------------------------------
+		  async addCategory() {
+		    const { newCatZh, newCatEn } = this.state();
+		    if (!newCatZh.trim()) {
+		      this.patch({ catError: { code: "plugin-repo/invalid-category-title" } });
+		      return;
+		    }
+		    this.patch({ catBusy: true, catError: null });
+		    const answer = await this.call("addCategory", { titleZh: newCatZh.trim(), titleEn: newCatEn.trim() });
+		    if (this.disposed) return;
+		    this.patch({ catBusy: false });
+		    if (!answer.ok || !answer.value?.ok) {
+		      this.patch({ catError: answer.ok ? answer.value?.error : answer.error });
+		      return;
+		    }
+		    this.patch({ newCatZh: "", newCatEn: "" });
+		    await this.loadCategories();
+		  }
+		  async removeCategory(id) {
+		    this.patch({ catBusy: true, catError: null });
+		    const answer = await this.call("removeCategory", { id });
+		    if (this.disposed) return;
+		    this.patch({ catBusy: false });
+		    if (!answer.ok || !answer.value?.ok) {
+		      this.patch({ catError: answer.ok ? answer.value?.error : answer.error });
+		      return;
+		    }
+		    if (this.state().catMembers?.categoryId === id) this.patch({ catMembers: null });
+		    await this.loadCategories();
+		  }
+		  /** 分类管理视图：列出某本地分类下的插件（复用 search 的分类过滤）。 */
+		  async openCategoryMembers(categoryId) {
+		    const answer = await this.call("search", { text: "", category: categoryId, sort: "votes", limit: 100, offset: 0 });
+		    if (this.disposed) return;
+		    if (!answer.ok) return;
+		    this.patch({ catMembers: { categoryId, items: answer.value.items ?? [] } });
+		  }
+		  async moveOutOfCategory(id) {
+		    const answer = await this.call("setLocalCategory", { id, categoryId: "" });
+		    if (this.disposed || !answer.ok) return;
+		    const members = this.state().catMembers;
+		    if (members) await this.openCategoryMembers(members.categoryId);
+		  }
+		  /** 详情页 labels 编辑：在现有基础上增删后整体提交。 */
+		  async addLabel(id, label) {
+		    const current = this.state().detail?.plugin?.labels ?? [];
+		    const next = [.../* @__PURE__ */ new Set([...current, label.trim()])].filter(Boolean);
+		    if (next.length === current.length) return;
+		    const answer = await this.call("setLabels", { id, labels: next });
+		    if (this.disposed || !answer.ok) return;
+		    this.patch({ labelDraft: "" });
+		    await this.loadEntry(id);
+		  }
+		  async removeLabel(id, label) {
+		    const current = this.state().detail?.plugin?.labels ?? [];
+		    const answer = await this.call("setLabels", { id, labels: current.filter((l) => l !== label) });
+		    if (this.disposed || !answer.ok) return;
+		    await this.loadEntry(id);
+		  }
+		  async setLocalCategory(id, categoryId) {
+		    const answer = await this.call("setLocalCategory", { id, categoryId });
+		    if (this.disposed || !answer.ok) return;
+		    await this.loadEntry(id);
+		    await this.loadCategories();
 		  }
 		};
 		var sectionStyle = {
@@ -366,6 +602,20 @@ window.__ModuleLoader__.load({
 		  lineHeight: 1,
 		  color: active ? "#f5a623" : "var(--dsh-muted, rgba(128,128,128,.55))"
 		});
+		var rowStyle = {
+		  display: "flex",
+		  alignItems: "center",
+		  gap: 10,
+		  padding: "10px 12px",
+		  borderRadius: 10,
+		  border: "1px solid var(--dsh-border, rgba(128,128,128,.25))"
+		};
+		var resultBarStyle = (failed) => ({
+		  fontSize: 12,
+		  padding: "6px 10px",
+		  borderRadius: 8,
+		  background: failed ? "var(--dsh-danger-bg, rgba(192,57,43,.12))" : "var(--dsh-sunken, rgba(128,128,128,.12))"
+		});
 		var EVENT_ICONS = {
 		  "new-plugin": "\u{1F195}",
 		  "update-available": "\u2B06\uFE0F",
@@ -377,7 +627,7 @@ window.__ModuleLoader__.load({
 		  const zhActive = language === "zh";
 		  return zhActive ? c.titleZh || c.titleEn || c.id : c.titleEn || c.titleZh || c.id;
 		}
-		function formatWhen(text, t) {
+		function formatWhen(text) {
 		  if (!text) return "";
 		  return text.replace("T", " ").slice(0, 16);
 		}
@@ -428,11 +678,12 @@ window.__ModuleLoader__.load({
 		        " ",
 		        t("votes")
 		      ] }),
-		      item.status !== "active" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: item.status }) : null
+		      item.status !== "active" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: item.status }) : null,
+		      (item.labels ?? []).slice(0, 3).map((l) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: l }, l))
 		    ] })
 		  ] }) });
 		}
-		function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate, rateError, rateBusy }) {
+		function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate, rateError, rateBusy, onInstall, onAddLabel, onRemoveLabel, onSetLocalCategory, labelDraft, onEditLabelDraft, pmBusy }) {
 		  const p = detail.plugin;
 		  const my = detail.myRating;
 		  const [copied, setCopied] = import_react.default.useState(false);
@@ -442,7 +693,8 @@ window.__ModuleLoader__.load({
 		    setScore(detail.myRating?.score ?? 0);
 		    setNote(detail.myRating?.note ?? "");
 		  }, [detail.myRating?.score, detail.myRating?.note]);
-		  const category = categories.find((c) => c.id === p.categoryId);
+		  const category = categories.find((c) => c.id === (p.localCategoryId || p.categoryId));
+		  const localCategories = categories.filter((c) => !c.builtin);
 		  const copy = async () => {
 		    try {
 		      await navigator.clipboard.writeText(detail.install.spec);
@@ -453,6 +705,7 @@ window.__ModuleLoader__.load({
 		  };
 		  const scoreTotal = detail.objectiveScore?.total ?? 0;
 		  const rateErrorText = rateError ? t(RATE_ERROR_KEYS[rateError.code] ?? "rateFailed") : null;
+		  const labels = p.labels ?? [];
 		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: detailStyle, "data-plugin-repo-detail": p.id, children: [
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: detailHeadStyle, children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: onBack, children: t("detailBack") }),
@@ -466,7 +719,7 @@ window.__ModuleLoader__.load({
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("factPackage") }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("code", { style: codeStyle, children: p.npm || "\u2014" }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("factCategory") }),
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: category ? categoryTitle(category, language) : p.categoryId || "\u2014" }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: category ? categoryTitle(category, language) : p.localCategoryId || p.categoryId || "\u2014" }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("factLicense") }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { children: p.license || "\u2014" }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("factStars") }),
@@ -528,6 +781,53 @@ window.__ModuleLoader__.load({
 		        ] })
 		      ] })
 		    ] }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("labelsTitle") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }, children: [
+		        labels.map((l) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_dsh_client_ui_primitives.Tag, { children: [
+		          l,
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		            "button",
+		            {
+		              type: "button",
+		              "aria-label": `remove ${l}`,
+		              style: { border: "none", background: "transparent", cursor: "pointer", padding: "0 0 0 4px", fontSize: 11 },
+		              onClick: () => onRemoveLabel(p.id, l),
+		              children: "\xD7"
+		            }
+		          )
+		        ] }, l)),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Input,
+		          {
+		            value: labelDraft,
+		            placeholder: t("labelsPlaceholder"),
+		            "aria-label": t("labelsPlaceholder"),
+		            onChange: (event) => onEditLabelDraft(event.target.value),
+		            onKeyDown: (event) => {
+		              if (event.key === "Enter" && labelDraft.trim()) onAddLabel(p.id, labelDraft);
+		            },
+		            style: { maxWidth: 200 }
+		          }
+		        )
+		      ] })
+		    ] }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("localCategoryTitle") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+		        "select",
+		        {
+		          "aria-label": t("localCategoryTitle"),
+		          value: p.localCategoryId ?? "",
+		          onChange: (event) => onSetLocalCategory(p.id, event.target.value),
+		          style: { fontSize: 12 },
+		          children: [
+		            /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: "", children: t("followCentral") }),
+		            localCategories.map((c) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: c.id, children: categoryTitle(c, language) }, c.id))
+		          ]
+		        }
+		      )
+		    ] }),
 		    Array.isArray(p.npmVersions) && p.npmVersions.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("versionsTitle") }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: cardMetaStyle, children: p.npmVersions.slice(0, 6).map((v) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: v.ver }, v.ver)) })
@@ -544,11 +844,175 @@ window.__ModuleLoader__.load({
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("installSpecLabel") }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: specRowStyle, children: [
 		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("code", { style: codeStyle, children: detail.install.spec }),
-		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", onClick: copy, children: copied ? t("copied") : t("copySpec") })
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", onClick: copy, children: copied ? t("copied") : t("copySpec") }),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Button,
+		          {
+		            variant: "outline",
+		            size: "sm",
+		            disabled: pmBusy !== "",
+		            onClick: () => onInstall(detail.install.spec),
+		            children: pmBusy ? t("installing") : t("installNow")
+		          }
+		        )
 		      ] }),
 		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("installHint") })
 		    ] }),
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("snapshotNote") })
+		  ] });
+		}
+		function InstalledView({ state, t, language, onRefresh, onToggle, onRemove, onOpenEntry, categories }) {
+		  const categoryMap = new Map(categories.map((c) => [c.id, categoryTitle(c, language)]));
+		  if (state.bundlesStatus === "loading" || state.bundlesStatus === "idle") {
+		    return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("installedLoading") });
+		  }
+		  if (state.bundlesStatus === "error") {
+		    return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { role: "alert", style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.StateDot, { state: "error" }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: mutedStyle, children: [
+		        t("errorPrefix"),
+		        ": ",
+		        state.bundlesError?.code ?? "unknown"
+		      ] }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", onClick: onRefresh, children: t("retry") })
+		    ] });
+		  }
+		  const items = (state.bundles ?? []).filter((b) => b.installed);
+		  if (items.length === 0) return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("installedEmpty") });
+		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { style: { ...cardsStyle, gridTemplateColumns: "1fr" }, children: items.map((b) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("li", { style: rowStyle, children: [
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.PluginArtworkDefault, { size: 20 }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { style: { fontSize: 13 }, children: b.metaTitle || b.name }),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("span", { style: mutedStyle, children: [
+		          b.name,
+		          b.version ? `@${b.version}` : ""
+		        ] }),
+		        b.official ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: t("officialTag") }) : null,
+		        b.enabled ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: t("enabledTag") }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Tag, { children: t("disabledTag") }),
+		        b.error ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_dsh_client_ui_primitives.Tag, { title: b.error.diagnostic, children: [
+		          "\u26A0 ",
+		          b.error.code
+		        ] }) : null
+		      ] }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginTop: 4 }, children: b.inRepo ? `${b.repoDesc || ""} \xB7 ${categoryMap.get(b.repoCategoryId) ?? ""} \xB7 ${t("scoreShort")} ${b.objectiveScore} \xB7 ${b.consensusVotes} ${t("votes")}` : t("notInRepo") })
+		    ] }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 6, flexShrink: 0 }, children: [
+		      b.inRepo ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => onOpenEntry(b.repoId), children: t("viewInRepo") }) : null,
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		        import_dsh_client_ui_primitives.Button,
+		        {
+		          variant: "outline",
+		          size: "sm",
+		          disabled: state.pmBusy !== "" || Boolean(b.readOnlyReason),
+		          onClick: () => onToggle(b.name, !b.enabled),
+		          children: b.enabled ? t("disableBtn") : t("enableBtn")
+		        }
+		      ),
+		      b.removable ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		        import_dsh_client_ui_primitives.Button,
+		        {
+		          variant: "ghost",
+		          size: "sm",
+		          disabled: state.pmBusy !== "",
+		          onClick: () => {
+		            if (window.confirm(t("removeConfirm"))) onRemove(b.name);
+		          },
+		          children: t("removeBtn")
+		        }
+		      ) : null
+		    ] })
+		  ] }, b.name)) });
+		}
+		function CategoriesView({ state, t, language, onEditNew, onAdd, onRemove, onOpenMembers, onMoveOut, onOpenEntry }) {
+		  const builtin = state.categories.filter((c) => c.builtin);
+		  const local = state.categories.filter((c) => !c.builtin);
+		  const members = state.catMembers;
+		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 12 }, children: [
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("catLocal") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }, children: [
+		        local.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("catEmpty") }) : null,
+		        local.map((c) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_dsh_client_ui_primitives.Tag, { children: [
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+		            "button",
+		            {
+		              type: "button",
+		              style: { border: "none", background: "transparent", cursor: "pointer", padding: 0 },
+		              onClick: () => onOpenMembers(c.id),
+		              children: [
+		                categoryTitle(c, language),
+		                " (",
+		                c.plugins,
+		                ")"
+		              ]
+		            }
+		          ),
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		            "button",
+		            {
+		              type: "button",
+		              "aria-label": `delete ${c.id}`,
+		              style: { border: "none", background: "transparent", cursor: "pointer", padding: "0 0 0 4px", fontSize: 11 },
+		              onClick: () => {
+		                if (window.confirm(t("catDeleteConfirm"))) onRemove(c.id);
+		              },
+		              children: "\xD7"
+		            }
+		          )
+		        ] }, c.id))
+		      ] }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Input,
+		          {
+		            value: state.newCatZh,
+		            placeholder: t("catAddPlaceholderZh"),
+		            "aria-label": t("catAddPlaceholderZh"),
+		            onChange: (event) => onEditNew({ newCatZh: event.target.value }),
+		            style: { maxWidth: 180 }
+		          }
+		        ),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Input,
+		          {
+		            value: state.newCatEn,
+		            placeholder: t("catAddPlaceholderEn"),
+		            "aria-label": t("catAddPlaceholderEn"),
+		            onChange: (event) => onEditNew({ newCatEn: event.target.value }),
+		            style: { maxWidth: 180 }
+		          }
+		        ),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", disabled: state.catBusy, onClick: onAdd, children: t("catAddBtn") }),
+		        state.catError ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { role: "alert", style: { ...mutedStyle, color: "var(--dsh-danger, #c0392b)" }, children: t("catInvalidTitle") }) : null
+		      ] })
+		    ] }),
+		    members ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: [
+		        t("catMembers"),
+		        "\uFF1A",
+		        categoryTitle(state.categories.find((c) => c.id === members.categoryId) ?? { id: members.categoryId }, language)
+		      ] }),
+		      members.items.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: mutedStyle, children: t("catMembersEmpty") }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("ul", { style: { ...cardsStyle, gridTemplateColumns: "1fr" }, children: members.items.map((item) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("li", { style: rowStyle, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("strong", { style: { fontSize: 13 }, children: item.name }),
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("span", { style: { ...mutedStyle, marginLeft: 8 }, children: item.desc || "" })
+		        ] }),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: { display: "flex", gap: 6, flexShrink: 0 }, children: [
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", onClick: () => onOpenEntry(item.id), children: t("viewInRepo") }),
+		          /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", onClick: () => onMoveOut(item.id), children: t("catMoveOut") })
+		        ] })
+		      ] }, item.id)) })
+		    ] }) : null,
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { ...mutedStyle, marginBottom: 4 }, children: t("catBuiltin") }),
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: categoriesStyle, children: builtin.map((c) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_dsh_client_ui_primitives.Tag, { children: [
+		        categoryTitle(c, language),
+		        " (",
+		        c.plugins,
+		        ")"
+		      ] }, c.id)) })
+		    ] })
 		  ] });
 		}
 		function RepoSection(props) {
@@ -565,8 +1029,38 @@ window.__ModuleLoader__.load({
 		  );
 		  const busy = state.status === "loading";
 		  const sortLabels = { votes: t("sortVotes"), stars: t("sortStars"), updated: t("sortUpdated"), score: t("sortScore") };
+		  const viewLabels = { browse: t("viewBrowse"), installed: t("viewInstalled"), categories: t("viewCategories") };
 		  let body = null;
-		  if (state.detailStatus === "loading") {
+		  if (state.view === "installed") {
+		    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		      InstalledView,
+		      {
+		        state,
+		        t,
+		        language,
+		        categories,
+		        onRefresh: props.refreshBundles,
+		        onToggle: props.toggleBundle,
+		        onRemove: props.removeBundle,
+		        onOpenEntry: props.openEntryByRepoId
+		      }
+		    );
+		  } else if (state.view === "categories") {
+		    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		      CategoriesView,
+		      {
+		        state,
+		        t,
+		        language,
+		        onEditNew: props.editNewCategory,
+		        onAdd: props.addCategory,
+		        onRemove: props.removeCategory,
+		        onOpenMembers: props.openCategoryMembers,
+		        onMoveOut: props.moveOutOfCategory,
+		        onOpenEntry: props.openEntryByRepoId
+		      }
+		    );
+		  } else if (state.detailStatus === "loading") {
 		    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("p", { style: mutedStyle, children: t("loading") });
 		  } else if (state.detail) {
 		    body = /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
@@ -580,7 +1074,14 @@ window.__ModuleLoader__.load({
 		        onRate: props.submitRating,
 		        onUnrate: props.removeRating,
 		        rateError: state.rateError,
-		        rateBusy: state.rateBusy
+		        rateBusy: state.rateBusy,
+		        onInstall: props.installSpec,
+		        onAddLabel: props.addLabel,
+		        onRemoveLabel: props.removeLabel,
+		        onSetLocalCategory: props.setLocalCategory,
+		        labelDraft: state.labelDraft,
+		        onEditLabelDraft: props.editLabelDraft,
+		        pmBusy: state.pmBusy
 		      }
 		    );
 		  } else if (state.status === "idle" || state.status === "loading") {
@@ -603,7 +1104,7 @@ window.__ModuleLoader__.load({
 		        EntryCard,
 		        {
 		          item,
-		          categoryName: categoryMap.get(item.categoryId) ?? "",
+		          categoryName: categoryMap.get(item.localCategoryId || item.categoryId) ?? "",
 		          t,
 		          onOpen: () => props.openEntry(item.id)
 		        },
@@ -612,69 +1113,81 @@ window.__ModuleLoader__.load({
 		      listing.hasMore ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", disabled: busy, onClick: props.more, children: t("showMore") }) : null
 		    ] });
 		  }
+		  const pmBar = state.pmResult ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: resultBarStyle(state.pmResult.application === "failed"), role: "status", children: [
+		    state.pmResult.action,
+		    " \u2192 ",
+		    state.pmResult.target,
+		    "\uFF1A",
+		    state.pmResult.application,
+		    state.pmResult.application === "failed" && state.pmResult.diagnostic ? `\uFF08${state.pmResult.diagnostic}\uFF09` : ""
+		  ] }) : null;
 		  return /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: sectionStyle, "data-plugin-tab": "repo", children: [
-		    /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: toolbarStyle, children: [
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-		        import_dsh_client_ui_primitives.Input,
-		        {
-		          type: "search",
-		          icon: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.IconSearchOutlineRegular, { size: 14 }),
-		          value: query.text,
-		          placeholder: t("searchPlaceholder"),
-		          "aria-label": t("searchPlaceholder"),
-		          style: { flex: 1, minWidth: 220 },
-		          onChange: (event) => props.editQuery({ text: event.target.value }),
-		          onBlur: props.submitSearch
-		        }
-		      ),
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-		        "select",
-		        {
-		          "aria-label": sortLabels[query.sort],
-		          value: query.sort,
-		          onChange: (event) => props.pickSort(event.target.value),
-		          style: { fontSize: 12 },
-		          children: Object.entries(sortLabels).map(([key, label]) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: key, children: label }, key))
-		        }
-		      ),
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-		        import_dsh_client_ui_primitives.Button,
-		        {
-		          variant: "ghost",
-		          size: "sm",
-		          "aria-label": t("refresh"),
-		          disabled: busy,
-		          onClick: props.refresh,
-		          icon: busy ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.StateDot, { state: "ongoing" }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.IconRefreshOutlineRegular, { size: 14 })
-		        }
-		      )
-		    ] }),
-		    categories.length === 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: categoriesStyle, role: "group", children: [
-		      /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
-		        import_dsh_client_ui_primitives.Pill,
-		        {
-		          active: query.category === "",
-		          "aria-pressed": query.category === "",
-		          onClick: () => props.pickCategory(""),
-		          children: t("allCategories")
-		        }
-		      ),
-		      categories.map((c) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
-		        import_dsh_client_ui_primitives.Pill,
-		        {
-		          active: query.category === c.id,
-		          "aria-pressed": query.category === c.id,
-		          onClick: () => props.pickCategory(c.id),
-		          children: [
-		            categoryTitle(c, language),
-		            " (",
-		            c.plugins,
-		            ")"
-		          ]
-		        },
-		        c.id
-		      ))
-		    ] }),
+		    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: categoriesStyle, role: "group", "aria-label": "view", children: Object.entries(viewLabels).map(([key, label]) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.Pill, { active: state.view === key, "aria-pressed": state.view === key, onClick: () => props.setView(key), children: label }, key)) }),
+		    pmBar,
+		    state.view === "browse" ? /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(import_jsx_runtime.Fragment, { children: [
+		      /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: toolbarStyle, children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Input,
+		          {
+		            type: "search",
+		            icon: /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.IconSearchOutlineRegular, { size: 14 }),
+		            value: query.text,
+		            placeholder: t("searchPlaceholder"),
+		            "aria-label": t("searchPlaceholder"),
+		            style: { flex: 1, minWidth: 220 },
+		            onChange: (event) => props.editQuery({ text: event.target.value }),
+		            onBlur: props.submitSearch
+		          }
+		        ),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          "select",
+		          {
+		            "aria-label": sortLabels[query.sort],
+		            value: query.sort,
+		            onChange: (event) => props.pickSort(event.target.value),
+		            style: { fontSize: 12 },
+		            children: Object.entries(sortLabels).map(([key, label]) => /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("option", { value: key, children: label }, key))
+		          }
+		        ),
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Button,
+		          {
+		            variant: "ghost",
+		            size: "sm",
+		            "aria-label": t("refresh"),
+		            disabled: busy,
+		            onClick: props.refresh,
+		            icon: busy ? /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.StateDot, { state: "ongoing" }) : /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(import_dsh_client_ui_primitives.IconRefreshOutlineRegular, { size: 14 })
+		          }
+		        )
+		      ] }),
+		      categories.length === 0 ? null : /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)("div", { style: categoriesStyle, role: "group", children: [
+		        /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
+		          import_dsh_client_ui_primitives.Pill,
+		          {
+		            active: query.category === "",
+		            "aria-pressed": query.category === "",
+		            onClick: () => props.pickCategory(""),
+		            children: t("allCategories")
+		          }
+		        ),
+		        categories.map((c) => /* @__PURE__ */ (0, import_jsx_runtime2.jsxs)(
+		          import_dsh_client_ui_primitives.Pill,
+		          {
+		            active: query.category === c.id,
+		            "aria-pressed": query.category === c.id,
+		            onClick: () => props.pickCategory(c.id),
+		            children: [
+		              categoryTitle(c, language),
+		              " (",
+		              c.plugins,
+		              ")"
+		            ]
+		          },
+		          c.id
+		        ))
+		      ] })
+		    ] }) : null,
 		    /* @__PURE__ */ (0, import_jsx_runtime2.jsx)("div", { style: { flex: 1, minHeight: 0, overflowY: "auto" }, children: body })
 		  ] });
 		}
@@ -685,9 +1198,16 @@ window.__ModuleLoader__.load({
 		  ctx.effect(() => {
 		    const off = ctx.on("connection/reset", () => {
 		      if (controller.state().status !== "idle") controller.reload();
+		      if (controller.state().bundlesStatus !== "idle") void controller.loadBundles();
 		    });
 		    return off;
 		  }, "ui-plugin-repo: connection reset");
+		  ctx.effect(() => {
+		    const off = ctx.remote.$on("plugin-manager/changed", () => {
+		      if (controller.state().bundlesStatus === "ready") void controller.loadBundles();
+		    });
+		    return off;
+		  }, "ui-plugin-repo: plugin-manager changed");
 		  const face = controller.face((text) => ctx.locale.resolveText(text));
 		  const t = ctx.locale.bind(NS);
 		  ctx.slots.inject("plugins.tab", () => ctx.slots.register({

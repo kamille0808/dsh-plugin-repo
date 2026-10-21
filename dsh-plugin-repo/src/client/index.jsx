@@ -1,11 +1,13 @@
 /**
- * dsh-plugin-repo 客户端半边 —— 插件页「仓库」标签（V0 只读浏览）。
+ * dsh-plugin-repo 客户端半边 —— 插件页「仓库」标签。
+ *
+ * V0 只读浏览 / V1 评分与事件 / V2 已安装管理增强 + 分类与 labels 管理。
  *
  * 机制与官方 Discover 页同款（@deepseek-ai/dsh-client-ui-plugin-market）：
  * - Lazy-CJS bundle（lib/client.js），由宿主 client-modules 经 /plugins/<id>/client.js 提供；
  * - ctx.slots.inject('plugins.tab') 注册标签；
- * - 数据经 ctx.connection.rpc.call('/api', 'pluginRepo/<method>', {args}) 动态调用
- *   宿主 SRC fallback Remote（无需手写 contribution）；
+ * - 数据经 ctx.connection.rpc.call('/api', '<namespace>/<method>', {args}) 动态调用：
+ *   pluginRepo/*（本插件宿主 SRC fallback Remote）与 pluginManager/*（官方现成命名空间）；
  * - 状态用 createSnapshotStore 快照 store，控制器照搬官方 DiscoverController 形态。
  */
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
@@ -19,13 +21,16 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 /** 词典命名空间（与 locale.register 的 NS 一致）。 */
 const NS = 'pluginRepo'
 
-/** 客户端插件需要的服务：槽位、词典、连接（rpc 动态调用）。 */
-const inject = ['slots', 'locale', 'connection']
+/** 客户端插件需要的服务：槽位、词典、连接（rpc 动态调用）、remote（订阅官方变更事件）。 */
+const inject = ['slots', 'locale', 'connection', 'remote']
 
 const PAGE_SIZE = 24
 
 const zh = {
   title: '仓库',
+  viewBrowse: '浏览仓库',
+  viewInstalled: '已安装',
+  viewCategories: '分类管理',
   searchPlaceholder: '搜索插件名称 / npm 包名 / 简介',
   allCategories: '全部分类',
   sortVotes: '共识票排序',
@@ -68,13 +73,50 @@ const zh = {
   installSpecLabel: '安装 spec',
   copySpec: '复制 spec',
   copied: '已复制',
-  installHint: 'V0 不直接安装：复制 spec 后到「已安装」页走 plugin_manager 审批链安装',
+  installNow: '安装',
+  installing: '安装中…',
+  installApplied: '已安装并启用',
+  installRestart: '已安装，重启后生效',
+  installFailed: '安装失败',
+  installHint: '安装动作经 pluginManager 执行，保留其审批与回滚；失败可改用复制的 spec 到「已安装」页操作',
   snapshotNote: '数据来自本地镜像快照（离线可读）',
   errorPrefix: '调用失败',
+  labelsTitle: '标签',
+  labelsPlaceholder: '回车添加标签（≤8 个）',
+  localCategoryTitle: '本地分类',
+  followCentral: '跟随中心库',
+  installedEmpty: '本 profile 没有已安装的外部 bundle',
+  installedLoading: '正在读取已安装列表',
+  notInRepo: '不在仓库镜像',
+  enabledTag: '已启用',
+  disabledTag: '已停用',
+  enableBtn: '启用',
+  disableBtn: '停用',
+  removeBtn: '移除',
+  removeConfirm: '确认移除该 bundle？移除会卸载其全部插件行',
+  officialTag: '官方',
+  viewInRepo: '仓库详情',
+  catBuiltin: '内置分类（只读）',
+  catLocal: '本地分类',
+  catAddPlaceholderZh: '新分类中文名',
+  catAddPlaceholderEn: '英文名（可选）',
+  catAddBtn: '新增分类',
+  catDelete: '删除',
+  catDeleteConfirm: '删除该本地分类？其中插件将回退到中心库分类',
+  catEmpty: '暂无本地分类',
+  catMembers: '该分类下的插件',
+  catMembersEmpty: '该分类下暂无插件',
+  catMoveOut: '移出',
+  catInvalidTitle: '中文名必填且 ≤30 字',
+  pmUnavailable: 'pluginManager 服务不可用（当前 profile 不支持插件管理）',
+  pmActionFailed: '操作失败',
 }
 
 const en = {
   title: 'Repository',
+  viewBrowse: 'Browse',
+  viewInstalled: 'Installed',
+  viewCategories: 'Categories',
   searchPlaceholder: 'Search plugin name / npm package / description',
   allCategories: 'All categories',
   sortVotes: 'Sort by consensus votes',
@@ -117,9 +159,43 @@ const en = {
   installSpecLabel: 'Install spec',
   copySpec: 'Copy spec',
   copied: 'Copied',
-  installHint: 'V0 does not install directly: copy the spec and install via the Installed tab (plugin_manager keeps its approval)',
+  installNow: 'Install',
+  installing: 'Installing…',
+  installApplied: 'Installed and enabled',
+  installRestart: 'Installed; takes effect after restart',
+  installFailed: 'Installation failed',
+  installHint: 'Installation runs through pluginManager with its approval and rollback; on failure, copy the spec and use the Installed page',
   snapshotNote: 'Data comes from the local mirror snapshot (readable offline)',
   errorPrefix: 'Call failed',
+  labelsTitle: 'Labels',
+  labelsPlaceholder: 'Press Enter to add a label (max 8)',
+  localCategoryTitle: 'Local category',
+  followCentral: 'Follow central catalog',
+  installedEmpty: 'No external bundles installed in this profile',
+  installedLoading: 'Reading installed bundles',
+  notInRepo: 'Not in repository mirror',
+  enabledTag: 'Enabled',
+  disabledTag: 'Disabled',
+  enableBtn: 'Enable',
+  disableBtn: 'Disable',
+  removeBtn: 'Remove',
+  removeConfirm: 'Remove this bundle? All its plugin rows will be unloaded',
+  officialTag: 'Official',
+  viewInRepo: 'Open in repository',
+  catBuiltin: 'Built-in categories (read-only)',
+  catLocal: 'Local categories',
+  catAddPlaceholderZh: 'New category name (zh)',
+  catAddPlaceholderEn: 'English name (optional)',
+  catAddBtn: 'Add category',
+  catDelete: 'Delete',
+  catDeleteConfirm: 'Delete this local category? Its plugins fall back to the central category',
+  catEmpty: 'No local categories yet',
+  catMembers: 'Plugins in this category',
+  catMembersEmpty: 'No plugins in this category',
+  catMoveOut: 'Move out',
+  catInvalidTitle: 'Chinese name required, ≤30 chars',
+  pmUnavailable: 'pluginManager service unavailable (this profile cannot manage plugins)',
+  pmActionFailed: 'Action failed',
 }
 
 const INITIAL = {
@@ -132,9 +208,22 @@ const INITIAL = {
   detailStatus: 'idle', // idle | loading | error
   rateError: null, // rate/unrate 失败的 {code, message}（null = 无）
   rateBusy: false,
+  // ---- V2 ----
+  view: 'browse', // browse | installed | categories
+  bundles: null, // installed() 合并读结果 items
+  bundlesStatus: 'idle', // idle | loading | ready | error
+  bundlesError: null,
+  pmBusy: '', // 进行中的 bundle 名（按钮禁用）
+  pmResult: null, // {action, application|code, diagnostic?, target} 操作结果条
+  newCatZh: '',
+  newCatEn: '',
+  catBusy: false,
+  catError: null,
+  catMembers: null, // {categoryId, items}
+  labelDraft: '',
 }
 
-/** 插件页「仓库」标签控制器：持有快照 store，经 connection rpc 读宿主镜像。 */
+/** 插件页「仓库」标签控制器：持有快照 store，经 connection rpc 读宿主镜像与 pluginManager。 */
 class RepoController {
   constructor(ctx) {
     this.ctx = ctx
@@ -160,6 +249,15 @@ class RepoController {
   async call(method, args) {
     try {
       return await this.ctx.connection.rpc.call('/api', `pluginRepo/${method}`, { args })
+    } catch (error) {
+      return { ok: false, error: { code: 'transport', message: String(error?.message ?? error) } }
+    }
+  }
+
+  /** 动态调用官方 pluginManager Remote（安装/启停/删除走它，保留官方审批链）。 */
+  async callPm(method, args) {
+    try {
+      return await this.ctx.connection.rpc.call('/api', `pluginManager/${method}`, { args })
     } catch (error) {
       return { ok: false, error: { code: 'transport', message: String(error?.message ?? error) } }
     }
@@ -217,6 +315,29 @@ class RepoController {
       removeRating: (id) => {
         void this.deleteRating(id)
       },
+      // ---- V2 动作 ----
+      setView: (view) => {
+        this.patch({ view })
+        if (view === 'installed' && this.state().bundlesStatus === 'idle') void this.loadBundles()
+        if (view === 'categories') void this.loadCategories()
+      },
+      refreshBundles: () => void this.loadBundles(),
+      toggleBundle: (name, enabled) => void this.toggleBundle(name, enabled),
+      removeBundle: (name) => void this.removeBundle(name),
+      installSpec: (spec) => void this.installSpec(spec),
+      openEntryByRepoId: (id) => {
+        this.patch({ view: 'browse' })
+        void this.loadEntry(id)
+      },
+      editNewCategory: (patch) => this.patch(patch),
+      addCategory: () => void this.addCategory(),
+      removeCategory: (id) => void this.removeCategory(id),
+      openCategoryMembers: (id) => void this.openCategoryMembers(id),
+      moveOutOfCategory: (id) => void this.moveOutOfCategory(id),
+      editLabelDraft: (labelDraft) => this.patch({ labelDraft }),
+      addLabel: (id, label) => void this.addLabel(id, label),
+      removeLabel: (id, label) => void this.removeLabel(id, label),
+      setLocalCategory: (id, categoryId) => void this.setLocalCategory(id, categoryId),
     }
   }
 
@@ -291,12 +412,138 @@ class RepoController {
       this.patch({ detailStatus: 'error' })
       return
     }
-    this.patch({ detail: answer.value, detailStatus: 'ready' })
+    this.patch({ detail: answer.value, detailStatus: 'ready', labelDraft: '' })
+  }
+
+  // ---------------------------------------------------------------------------
+  // V2：已安装管理（读走本插件 installed 合并读；写动作直调官方 pluginManager）
+  // ---------------------------------------------------------------------------
+
+  async loadBundles() {
+    this.patch({ bundlesStatus: 'loading' })
+    const answer = await this.call('installed', {})
+    if (this.disposed) return
+    if (!answer.ok || !answer.value?.ok) {
+      this.patch({ bundlesStatus: 'error', bundlesError: answer.ok ? answer.value?.error : answer.error })
+      return
+    }
+    this.patch({ bundlesStatus: 'ready', bundles: answer.value.items ?? [], bundlesError: null })
+  }
+
+  /** 启停/删除/安装动作统一出口：记录结果条并重拉已安装列表。 */
+  async pmAction(action, name, answerPromise) {
+    this.patch({ pmBusy: name, pmResult: null })
+    const answer = await answerPromise
+    if (this.disposed) return
+    this.patch({ pmBusy: '' })
+    if (!answer.ok) {
+      this.patch({ pmResult: { action, application: 'failed', diagnostic: answer.error?.message ?? answer.error?.code ?? '', target: name } })
+      return
+    }
+    const v = answer.value ?? {}
+    this.patch({
+      pmResult: {
+        action,
+        application: v.application ?? (v.error ? 'failed' : 'applied'),
+        diagnostic: v.error?.diagnostic ?? v.error?.code ?? '',
+        target: v.target ?? name,
+      },
+    })
+    await this.loadBundles()
+  }
+
+  toggleBundle(name, enabled) {
+    return this.pmAction(enabled ? 'enable' : 'disable', name, this.callPm('setBundleEnabled', { name, enabled }))
+  }
+
+  removeBundle(name) {
+    return this.pmAction('remove', name, this.callPm('removeBundle', { name }))
+  }
+
+  /** 详情页直接安装：requestId 追踪，installBundle 结算后展示 application 状态。 */
+  installSpec(spec) {
+    const requestId = `repo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    return this.pmAction('install', spec, this.callPm('installBundle', { spec, options: { requestId } }))
+  }
+
+  // ---------------------------------------------------------------------------
+  // V2：分类与 labels（本地私有，宿主只写本机域）
+  // ---------------------------------------------------------------------------
+
+  async addCategory() {
+    const { newCatZh, newCatEn } = this.state()
+    if (!newCatZh.trim()) {
+      this.patch({ catError: { code: 'plugin-repo/invalid-category-title' } })
+      return
+    }
+    this.patch({ catBusy: true, catError: null })
+    const answer = await this.call('addCategory', { titleZh: newCatZh.trim(), titleEn: newCatEn.trim() })
+    if (this.disposed) return
+    this.patch({ catBusy: false })
+    if (!answer.ok || !answer.value?.ok) {
+      this.patch({ catError: answer.ok ? answer.value?.error : answer.error })
+      return
+    }
+    this.patch({ newCatZh: '', newCatEn: '' })
+    await this.loadCategories()
+  }
+
+  async removeCategory(id) {
+    this.patch({ catBusy: true, catError: null })
+    const answer = await this.call('removeCategory', { id })
+    if (this.disposed) return
+    this.patch({ catBusy: false })
+    if (!answer.ok || !answer.value?.ok) {
+      this.patch({ catError: answer.ok ? answer.value?.error : answer.error })
+      return
+    }
+    if (this.state().catMembers?.categoryId === id) this.patch({ catMembers: null })
+    await this.loadCategories()
+  }
+
+  /** 分类管理视图：列出某本地分类下的插件（复用 search 的分类过滤）。 */
+  async openCategoryMembers(categoryId) {
+    const answer = await this.call('search', { text: '', category: categoryId, sort: 'votes', limit: 100, offset: 0 })
+    if (this.disposed) return
+    if (!answer.ok) return
+    this.patch({ catMembers: { categoryId, items: answer.value.items ?? [] } })
+  }
+
+  async moveOutOfCategory(id) {
+    const answer = await this.call('setLocalCategory', { id, categoryId: '' })
+    if (this.disposed || !answer.ok) return
+    const members = this.state().catMembers
+    if (members) await this.openCategoryMembers(members.categoryId)
+  }
+
+  /** 详情页 labels 编辑：在现有基础上增删后整体提交。 */
+  async addLabel(id, label) {
+    const current = this.state().detail?.plugin?.labels ?? []
+    const next = [...new Set([...current, label.trim()])].filter(Boolean)
+    if (next.length === current.length) return
+    const answer = await this.call('setLabels', { id, labels: next })
+    if (this.disposed || !answer.ok) return
+    this.patch({ labelDraft: '' })
+    await this.loadEntry(id)
+  }
+
+  async removeLabel(id, label) {
+    const current = this.state().detail?.plugin?.labels ?? []
+    const answer = await this.call('setLabels', { id, labels: current.filter((l) => l !== label) })
+    if (this.disposed || !answer.ok) return
+    await this.loadEntry(id)
+  }
+
+  async setLocalCategory(id, categoryId) {
+    const answer = await this.call('setLocalCategory', { id, categoryId })
+    if (this.disposed || !answer.ok) return
+    await this.loadEntry(id)
+    await this.loadCategories()
   }
 }
 
 // ---------------------------------------------------------------------------
-// 样式（V0 内联，不引入 CSS 管线）
+// 样式（内联，不引入 CSS 管线）
 // ---------------------------------------------------------------------------
 const sectionStyle = {
   display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 20px', minHeight: 0, flex: 1,
@@ -331,6 +578,14 @@ const starStyle = (active) => ({
   border: 'none', background: 'transparent', cursor: 'pointer', padding: '0 2px',
   fontSize: 18, lineHeight: 1, color: active ? '#f5a623' : 'var(--dsh-muted, rgba(128,128,128,.55))',
 })
+const rowStyle = {
+  display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 10,
+  border: '1px solid var(--dsh-border, rgba(128,128,128,.25))',
+}
+const resultBarStyle = (failed) => ({
+  fontSize: 12, padding: '6px 10px', borderRadius: 8,
+  background: failed ? 'var(--dsh-danger-bg, rgba(192,57,43,.12))' : 'var(--dsh-sunken, rgba(128,128,128,.12))',
+})
 
 /** 更新事件 kind → 图标（契约 §6 名录；未知 kind 用通用圆点）。 */
 const EVENT_ICONS = {
@@ -346,7 +601,7 @@ function categoryTitle(c, language) {
   return zhActive ? (c.titleZh || c.titleEn || c.id) : (c.titleEn || c.titleZh || c.id)
 }
 
-function formatWhen(text, t) {
+function formatWhen(text) {
   if (!text) return ''
   return text.replace('T', ' ').slice(0, 16)
 }
@@ -397,14 +652,15 @@ function EntryCard({ item, categoryName, t, onOpen }) {
           <Tag>★ {item.stars}</Tag>
           <Tag>{item.consensusVotes} {t('votes')}</Tag>
           {item.status !== 'active' ? <Tag>{item.status}</Tag> : null}
+          {(item.labels ?? []).slice(0, 3).map((l) => <Tag key={l}>{l}</Tag>)}
         </span>
       </button>
     </li>
   )
 }
 
-/** 详情视图（V0 为页内替换视图，够用且避免抽屉焦点管理）。 */
-function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate, rateError, rateBusy }) {
+/** 详情视图（页内替换视图，够用且避免抽屉焦点管理）。 */
+function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate, rateError, rateBusy, onInstall, onAddLabel, onRemoveLabel, onSetLocalCategory, labelDraft, onEditLabelDraft, pmBusy }) {
   const p = detail.plugin
   const my = detail.myRating
   const [copied, setCopied] = React.useState(false)
@@ -415,7 +671,8 @@ function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate
     setScore(detail.myRating?.score ?? 0)
     setNote(detail.myRating?.note ?? '')
   }, [detail.myRating?.score, detail.myRating?.note])
-  const category = categories.find((c) => c.id === p.categoryId)
+  const category = categories.find((c) => c.id === (p.localCategoryId || p.categoryId))
+  const localCategories = categories.filter((c) => !c.builtin)
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(detail.install.spec)
@@ -427,6 +684,7 @@ function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate
   }
   const scoreTotal = detail.objectiveScore?.total ?? 0
   const rateErrorText = rateError ? t(RATE_ERROR_KEYS[rateError.code] ?? 'rateFailed') : null
+  const labels = p.labels ?? []
   return (
     <div style={detailStyle} data-plugin-repo-detail={p.id}>
       <div style={detailHeadStyle}>
@@ -439,7 +697,7 @@ function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate
       {p.descZh && p.descEn ? <p style={{ ...mutedStyle, margin: 0 }}>{p.descEn}</p> : null}
       <div style={factsStyle}>
         <span style={mutedStyle}>{t('factPackage')}</span><code style={codeStyle}>{p.npm || '—'}</code>
-        <span style={mutedStyle}>{t('factCategory')}</span><span>{category ? categoryTitle(category, language) : p.categoryId || '—'}</span>
+        <span style={mutedStyle}>{t('factCategory')}</span><span>{category ? categoryTitle(category, language) : (p.localCategoryId || p.categoryId) || '—'}</span>
         <span style={mutedStyle}>{t('factLicense')}</span><span>{p.license || '—'}</span>
         <span style={mutedStyle}>{t('factStars')}</span><span>★ {p.stars}</span>
         <span style={mutedStyle}>{t('factUpdated')}</span><span>{formatWhen(p.updatedAt)}</span>
@@ -495,6 +753,44 @@ function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate
           </div>
         </div>
       </div>
+      <div>
+        <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('labelsTitle')}</div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {labels.map((l) => (
+            <Tag key={l}>
+              {l}
+              <button
+                type="button"
+                aria-label={`remove ${l}`}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '0 0 0 4px', fontSize: 11 }}
+                onClick={() => onRemoveLabel(p.id, l)}
+              >×</button>
+            </Tag>
+          ))}
+          <Input
+            value={labelDraft}
+            placeholder={t('labelsPlaceholder')}
+            aria-label={t('labelsPlaceholder')}
+            onChange={(event) => onEditLabelDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && labelDraft.trim()) onAddLabel(p.id, labelDraft)
+            }}
+            style={{ maxWidth: 200 }}
+          />
+        </div>
+      </div>
+      <div>
+        <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('localCategoryTitle')}</div>
+        <select
+          aria-label={t('localCategoryTitle')}
+          value={p.localCategoryId ?? ''}
+          onChange={(event) => onSetLocalCategory(p.id, event.target.value)}
+          style={{ fontSize: 12 }}
+        >
+          <option value="">{t('followCentral')}</option>
+          {localCategories.map((c) => <option key={c.id} value={c.id}>{categoryTitle(c, language)}</option>)}
+        </select>
+      </div>
       {Array.isArray(p.npmVersions) && p.npmVersions.length > 0 ? (
         <div>
           <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('versionsTitle')}</div>
@@ -528,6 +824,12 @@ function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate
           <Button variant="outline" size="sm" onClick={copy}>
             {copied ? t('copied') : t('copySpec')}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pmBusy !== ''}
+            onClick={() => onInstall(detail.install.spec)}
+          >{pmBusy ? t('installing') : t('installNow')}</Button>
         </div>
         <p style={mutedStyle}>{t('installHint')}</p>
       </div>
@@ -536,7 +838,148 @@ function EntryDetail({ detail, categories, t, language, onBack, onRate, onUnrate
   )
 }
 
-/** 「仓库」标签根组件：props 由槽位框架注入（t/hooks/动作）+ 插件页（install/openPackage）。 */
+/** 已安装子视图：pluginManager listBundles 与本仓库镜像的合并读 + 启停/移除动作。 */
+function InstalledView({ state, t, language, onRefresh, onToggle, onRemove, onOpenEntry, categories }) {
+  const categoryMap = new Map(categories.map((c) => [c.id, categoryTitle(c, language)]))
+  if (state.bundlesStatus === 'loading' || state.bundlesStatus === 'idle') {
+    return <p style={mutedStyle}>{t('installedLoading')}</p>
+  }
+  if (state.bundlesStatus === 'error') {
+    return (
+      <div role="alert" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <StateDot state="error" />
+        <span style={mutedStyle}>{t('errorPrefix')}: {state.bundlesError?.code ?? 'unknown'}</span>
+        <Button variant="outline" size="sm" onClick={onRefresh}>{t('retry')}</Button>
+      </div>
+    )
+  }
+  const items = (state.bundles ?? []).filter((b) => b.installed)
+  if (items.length === 0) return <p style={mutedStyle}>{t('installedEmpty')}</p>
+  return (
+    <ul style={{ ...cardsStyle, gridTemplateColumns: '1fr' }}>
+      {items.map((b) => (
+        <li key={b.name} style={rowStyle}>
+          <PluginArtworkDefault size={20} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 13 }}>{b.metaTitle || b.name}</strong>
+              <span style={mutedStyle}>{b.name}{b.version ? `@${b.version}` : ''}</span>
+              {b.official ? <Tag>{t('officialTag')}</Tag> : null}
+              {b.enabled ? <Tag>{t('enabledTag')}</Tag> : <Tag>{t('disabledTag')}</Tag>}
+              {b.error ? <Tag title={b.error.diagnostic}>⚠ {b.error.code}</Tag> : null}
+            </div>
+            <div style={{ ...mutedStyle, marginTop: 4 }}>
+              {b.inRepo
+                ? `${b.repoDesc || ''} · ${categoryMap.get(b.repoCategoryId) ?? ''} · ${t('scoreShort')} ${b.objectiveScore} · ${b.consensusVotes} ${t('votes')}`
+                : t('notInRepo')}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {b.inRepo ? (
+              <Button variant="ghost" size="sm" onClick={() => onOpenEntry(b.repoId)}>{t('viewInRepo')}</Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={state.pmBusy !== '' || Boolean(b.readOnlyReason)}
+              onClick={() => onToggle(b.name, !b.enabled)}
+            >{b.enabled ? t('disableBtn') : t('enableBtn')}</Button>
+            {b.removable ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={state.pmBusy !== ''}
+                onClick={() => {
+                  if (window.confirm(t('removeConfirm'))) onRemove(b.name)
+                }}
+              >{t('removeBtn')}</Button>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** 分类管理子视图：内置只读 + 本地增删 + 分类成员移出。 */
+function CategoriesView({ state, t, language, onEditNew, onAdd, onRemove, onOpenMembers, onMoveOut, onOpenEntry }) {
+  const builtin = state.categories.filter((c) => c.builtin)
+  const local = state.categories.filter((c) => !c.builtin)
+  const members = state.catMembers
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div>
+        <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('catLocal')}</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {local.length === 0 ? <span style={mutedStyle}>{t('catEmpty')}</span> : null}
+          {local.map((c) => (
+            <Tag key={c.id}>
+              <button type="button" style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+                onClick={() => onOpenMembers(c.id)}>{categoryTitle(c, language)} ({c.plugins})</button>
+              <button
+                type="button"
+                aria-label={`delete ${c.id}`}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '0 0 0 4px', fontSize: 11 }}
+                onClick={() => {
+                  if (window.confirm(t('catDeleteConfirm'))) onRemove(c.id)
+                }}
+              >×</button>
+            </Tag>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          <Input
+            value={state.newCatZh}
+            placeholder={t('catAddPlaceholderZh')}
+            aria-label={t('catAddPlaceholderZh')}
+            onChange={(event) => onEditNew({ newCatZh: event.target.value })}
+            style={{ maxWidth: 180 }}
+          />
+          <Input
+            value={state.newCatEn}
+            placeholder={t('catAddPlaceholderEn')}
+            aria-label={t('catAddPlaceholderEn')}
+            onChange={(event) => onEditNew({ newCatEn: event.target.value })}
+            style={{ maxWidth: 180 }}
+          />
+          <Button variant="outline" size="sm" disabled={state.catBusy} onClick={onAdd}>{t('catAddBtn')}</Button>
+          {state.catError ? <span role="alert" style={{ ...mutedStyle, color: 'var(--dsh-danger, #c0392b)' }}>{t('catInvalidTitle')}</span> : null}
+        </div>
+      </div>
+      {members ? (
+        <div>
+          <div style={{ ...mutedStyle, marginBottom: 4 }}>
+            {t('catMembers')}：{categoryTitle(state.categories.find((c) => c.id === members.categoryId) ?? { id: members.categoryId }, language)}
+          </div>
+          {members.items.length === 0 ? <span style={mutedStyle}>{t('catMembersEmpty')}</span> : (
+            <ul style={{ ...cardsStyle, gridTemplateColumns: '1fr' }}>
+              {members.items.map((item) => (
+                <li key={item.id} style={rowStyle}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong style={{ fontSize: 13 }}>{item.name}</strong>
+                    <span style={{ ...mutedStyle, marginLeft: 8 }}>{item.desc || ''}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <Button variant="ghost" size="sm" onClick={() => onOpenEntry(item.id)}>{t('viewInRepo')}</Button>
+                    <Button variant="outline" size="sm" onClick={() => onMoveOut(item.id)}>{t('catMoveOut')}</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+      <div>
+        <div style={{ ...mutedStyle, marginBottom: 4 }}>{t('catBuiltin')}</div>
+        <div style={categoriesStyle}>
+          {builtin.map((c) => <Tag key={c.id}>{categoryTitle(c, language)} ({c.plugins})</Tag>)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 「仓库」标签根组件：props 由槽位框架注入（t/hooks/动作）。 */
 function RepoSection(props) {
   const { t } = props
   const state = props.useRepo((snapshot) => snapshot)
@@ -552,9 +995,37 @@ function RepoSection(props) {
   )
   const busy = state.status === 'loading'
   const sortLabels = { votes: t('sortVotes'), stars: t('sortStars'), updated: t('sortUpdated'), score: t('sortScore') }
+  const viewLabels = { browse: t('viewBrowse'), installed: t('viewInstalled'), categories: t('viewCategories') }
 
   let body = null
-  if (state.detailStatus === 'loading') {
+  if (state.view === 'installed') {
+    body = (
+      <InstalledView
+        state={state}
+        t={t}
+        language={language}
+        categories={categories}
+        onRefresh={props.refreshBundles}
+        onToggle={props.toggleBundle}
+        onRemove={props.removeBundle}
+        onOpenEntry={props.openEntryByRepoId}
+      />
+    )
+  } else if (state.view === 'categories') {
+    body = (
+      <CategoriesView
+        state={state}
+        t={t}
+        language={language}
+        onEditNew={props.editNewCategory}
+        onAdd={props.addCategory}
+        onRemove={props.removeCategory}
+        onOpenMembers={props.openCategoryMembers}
+        onMoveOut={props.moveOutOfCategory}
+        onOpenEntry={props.openEntryByRepoId}
+      />
+    )
+  } else if (state.detailStatus === 'loading') {
     body = <p style={mutedStyle}>{t('loading')}</p>
   } else if (state.detail) {
     body = (
@@ -568,6 +1039,13 @@ function RepoSection(props) {
         onUnrate={props.removeRating}
         rateError={state.rateError}
         rateBusy={state.rateBusy}
+        onInstall={props.installSpec}
+        onAddLabel={props.addLabel}
+        onRemoveLabel={props.removeLabel}
+        onSetLocalCategory={props.setLocalCategory}
+        labelDraft={state.labelDraft}
+        onEditLabelDraft={props.editLabelDraft}
+        pmBusy={state.pmBusy}
       />
     )
   } else if (state.status === 'idle' || state.status === 'loading') {
@@ -590,7 +1068,7 @@ function RepoSection(props) {
             <EntryCard
               key={item.id}
               item={item}
-              categoryName={categoryMap.get(item.categoryId) ?? ''}
+              categoryName={categoryMap.get(item.localCategoryId || item.categoryId) ?? ''}
               t={t}
               onOpen={() => props.openEntry(item.id)}
             />
@@ -603,59 +1081,78 @@ function RepoSection(props) {
     )
   }
 
+  const pmBar = state.pmResult ? (
+    <div style={resultBarStyle(state.pmResult.application === 'failed')} role="status">
+      {state.pmResult.action} → {state.pmResult.target}：{state.pmResult.application}
+      {state.pmResult.application === 'failed' && state.pmResult.diagnostic ? `（${state.pmResult.diagnostic}）` : ''}
+    </div>
+  ) : null
+
   return (
     <div style={sectionStyle} data-plugin-tab="repo">
-      <div style={toolbarStyle}>
-        <Input
-          type="search"
-          icon={<IconSearchOutlineRegular size={14} />}
-          value={query.text}
-          placeholder={t('searchPlaceholder')}
-          aria-label={t('searchPlaceholder')}
-          style={{ flex: 1, minWidth: 220 }}
-          onChange={(event) => props.editQuery({ text: event.target.value })}
-          onBlur={props.submitSearch}
-        />
-        <select
-          aria-label={sortLabels[query.sort]}
-          value={query.sort}
-          onChange={(event) => props.pickSort(event.target.value)}
-          style={{ fontSize: 12 }}
-        >
-          {Object.entries(sortLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-        </select>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label={t('refresh')}
-          disabled={busy}
-          onClick={props.refresh}
-          icon={busy ? <StateDot state="ongoing" /> : <IconRefreshOutlineRegular size={14} />}
-        />
+      <div style={categoriesStyle} role="group" aria-label="view">
+        {Object.entries(viewLabels).map(([key, label]) => (
+          <Pill key={key} active={state.view === key} aria-pressed={state.view === key} onClick={() => props.setView(key)}>
+            {label}
+          </Pill>
+        ))}
       </div>
-      {categories.length === 0 ? null : (
-        <div style={categoriesStyle} role="group">
-          <Pill
-            active={query.category === ''}
-            aria-pressed={query.category === ''}
-            onClick={() => props.pickCategory('')}
-          >{t('allCategories')}</Pill>
-          {categories.map((c) => (
-            <Pill
-              key={c.id}
-              active={query.category === c.id}
-              aria-pressed={query.category === c.id}
-              onClick={() => props.pickCategory(c.id)}
-            >{categoryTitle(c, language)} ({c.plugins})</Pill>
-          ))}
-        </div>
-      )}
+      {pmBar}
+      {state.view === 'browse' ? (
+        <Fragment>
+          <div style={toolbarStyle}>
+            <Input
+              type="search"
+              icon={<IconSearchOutlineRegular size={14} />}
+              value={query.text}
+              placeholder={t('searchPlaceholder')}
+              aria-label={t('searchPlaceholder')}
+              style={{ flex: 1, minWidth: 220 }}
+              onChange={(event) => props.editQuery({ text: event.target.value })}
+              onBlur={props.submitSearch}
+            />
+            <select
+              aria-label={sortLabels[query.sort]}
+              value={query.sort}
+              onChange={(event) => props.pickSort(event.target.value)}
+              style={{ fontSize: 12 }}
+            >
+              {Object.entries(sortLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={t('refresh')}
+              disabled={busy}
+              onClick={props.refresh}
+              icon={busy ? <StateDot state="ongoing" /> : <IconRefreshOutlineRegular size={14} />}
+            />
+          </div>
+          {categories.length === 0 ? null : (
+            <div style={categoriesStyle} role="group">
+              <Pill
+                active={query.category === ''}
+                aria-pressed={query.category === ''}
+                onClick={() => props.pickCategory('')}
+              >{t('allCategories')}</Pill>
+              {categories.map((c) => (
+                <Pill
+                  key={c.id}
+                  active={query.category === c.id}
+                  aria-pressed={query.category === c.id}
+                  onClick={() => props.pickCategory(c.id)}
+                >{categoryTitle(c, language)} ({c.plugins})</Pill>
+              ))}
+            </div>
+          )}
+        </Fragment>
+      ) : null}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{body}</div>
     </div>
   )
 }
 
-/** 客户端入口：注册词典 + 控制器 + plugins.tab 槽位。 */
+/** 客户端入口：注册词典 + 控制器 + plugins.tab 槽位 + 官方变更事件订阅。 */
 function apply(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-plugin-repo: dictionaries')
   const controller = new RepoController(ctx)
@@ -664,9 +1161,17 @@ function apply(ctx) {
     const off = ctx.on('connection/reset', () => {
       // 连接重置后宿主可能换代：就绪态重新拉取，未渲染（idle）保持不动
       if (controller.state().status !== 'idle') controller.reload()
+      if (controller.state().bundlesStatus !== 'idle') void controller.loadBundles()
     })
     return off
   }, 'ui-plugin-repo: connection reset')
+  ctx.effect(() => {
+    // 官方 pluginManager 的变更事件：已安装视图就绪时自动刷新
+    const off = ctx.remote.$on('plugin-manager/changed', () => {
+      if (controller.state().bundlesStatus === 'ready') void controller.loadBundles()
+    })
+    return off
+  }, 'ui-plugin-repo: plugin-manager changed')
   const face = controller.face((text) => ctx.locale.resolveText(text))
   const t = ctx.locale.bind(NS)
   ctx.slots.inject('plugins.tab', () => ctx.slots.register({
