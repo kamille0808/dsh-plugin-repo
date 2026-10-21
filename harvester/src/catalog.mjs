@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 归一化 → 门槛校验 → 事务 upsert → 事件。
  *
  * 纪律（契约 §1、§4、§6）：
@@ -10,7 +10,7 @@
 import { log } from './log.mjs'
 import {
   contractId, buildInstallSpec, resolveCategoryId, isValidNpmName,
-  normalizeNpmVersions, latestVersion, compareSemverDesc, signalsHash, parseContractId,
+  normalizeNpmVersions, latestVersion, compareSemver, signalsHash, parseContractId,
 } from './normalize.mjs'
 import {
   upsertPlugins, syncPluginSourcesBatch, upsertCheck, insertEvent, renamePlugin, upsertCategory,
@@ -148,6 +148,7 @@ export function applyAdmissionGate(candidate, { requiresBundleDeclaration = fals
  */
 export async function persistCandidates(client, candidates, existing, options = {}) {
   const { sourceSnapshots = new Map(), aliasMap = {}, knownCategories = null, batchSize = 400 } = options
+  const failedSources = new Set(options.failedSources ?? [])
   const stats = { inserted: 0, updated: 0, unchanged: 0, events: [] }
   const existingById = new Map(existing.plugins.map((p) => [p.id, p]))
   const nextSources = new Map()
@@ -210,8 +211,13 @@ export async function persistCandidates(client, candidates, existing, options = 
   }
 
   // 5) removed-from-list：信源上轮收录、本轮不再收录
+  // 抓取失败的源一律跳过：它本轮没有数据，不代表它把条目移除了
   const removed = []
   for (const [sourceId, previousIds] of sourceSnapshots) {
+    if (failedSources.has(sourceId)) {
+      log.warn('信源本轮抓取失败，跳过 removed-from-list 判定', { source: sourceId })
+      continue
+    }
     const currentIds = new Set()
     for (const [pluginId, sources] of nextSources) {
       if (sources.includes(sourceId)) currentIds.add(pluginId)
@@ -238,7 +244,7 @@ function detectUpdateEvent(previous, row) {
   const before = latestVersion(previous.npm_versions ?? [])
   const after = latestVersion(row.npm_versions ?? [])
   if (!before || !after || before === after) return null
-  const cmp = compareSemverDesc(after, before)
+  const cmp = compareSemver(after, before)
   if (cmp <= 0) return null
   return { kind: 'update-available', pluginId: row.id, detail: { from: before, to: after } }
 }
@@ -309,7 +315,7 @@ export async function applyVerification(client, pluginId, previous, verification
   // npm 新版本
   const before = latestVersion(previous?.npm_versions ?? [])
   const after = latestVersion(npmVersions)
-  if (before && after && before !== after && compareSemverDesc(after, before) > 0) {
+  if (before && after && before !== after && compareSemver(after, before) > 0) {
     events.push({ kind: 'update-available', pluginId, detail: { from: before, to: after } })
   }
 

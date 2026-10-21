@@ -193,6 +193,34 @@ test('git 源条目带 40 位 commit', () => {
   assert.equal(gitOnly.versions[0].source.url, 'https://github.com/owner/git-only')
 })
 
+test('索引条目的中英简介分别落位（不互相顶掉）', () => {
+  const catalog = {
+    ...CATALOG,
+    plugins: [{
+      ...CATALOG.plugins[0],
+      desc_en: 'English description',
+      desc_zh: '中文简介',
+    }],
+  }
+  const index = renderMarketIndex(catalog)
+  const parsed = validateIndex(index, 'https://example.com/index.json')
+  const entry = parsed.plugins.find((p) => p.name === '@scope/dsh-npm')
+  assert.equal(entry.description.en, 'English description')
+  assert.equal(entry.description.zh, '中文简介')
+})
+
+test('只有一种语言时，en 与 zh 用同一个值（format-1 要求含 en）', () => {
+  const catalog = {
+    ...CATALOG,
+    plugins: [{ ...CATALOG.plugins[0], desc_en: 'Only English', desc_zh: '' }],
+  }
+  const index = renderMarketIndex(catalog)
+  const parsed = validateIndex(index, 'https://example.com/index.json')
+  const entry = parsed.plugins.find((p) => p.name === '@scope/dsh-npm')
+  assert.equal(entry.description.en, 'Only English')
+  assert.equal(entry.description.zh, 'Only English')
+})
+
 test('浏览页数据只含公共字段', () => {
   const data = buildBrowseData(CATALOG)
   assert.equal(data.plugins.length, 3)

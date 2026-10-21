@@ -80,10 +80,16 @@ export async function runHarvester(config, options = {}) {
     }
 
     const candidates = mergeCandidates(collected, config.categories.alias ?? {}, config.knownCategories)
+    // 抓取失败或本轮停用的源，一律不做 removed-from-list 判定
+    const failedSources = [
+      ...summary.sources.failed.map((s) => s.source_id),
+      ...summary.sources.skipped.map((s) => s.source_id),
+    ]
     const persisted = await withTransaction(pool, (client) => persistCandidates(client, candidates, state1, {
       sourceSnapshots,
       aliasMap: config.categories.alias ?? {},
       knownCategories: config.knownCategories,
+      failedSources,
     }))
 
     summary.newPlugins = persisted.inserted
@@ -100,24 +106,27 @@ export async function runHarvester(config, options = {}) {
     }
 
     // 写入本轮信源快照（下一轮的 removed-from-list 判定基准）
-    for (const { source, entries } of collected) {
-      if (!source.votes) continue
+    // 只写抓取成功的源：失败的源若写成空快照，下一轮会把它的全部条目
+    // 误判成「被移除」，刷出一堆假的 removed-from-list 事件
+    for (const { source, entries, ok } of collected) {
+      if (!source.votes || !ok) continue
       const ids = entries.map((e) => e.parsed ? contractId(e.parsed.owner, e.parsed.repo, e.parsed.subPath) : null).filter(Boolean)
       await writeSourceSnapshot(pool, source.source_id, ids, { title: source.title, url: source.url })
     }
 
     // ---------------- Phase C：L3 候选池 + 入库门槛 ----------------
-    await runCandidatePhase(pool, http, config, state1, summary)
+    const state2 = await loadCatalog(pool)
+    await runCandidatePhase(pool, http, config, state2, summary)
 
     // ---------------- Phase D：渲染 + 校验 + 发布 ----------------
-    const state2 = await loadCatalog(pool)
-    const index = renderMarketIndex(state2)
+    const state3 = await loadCatalog(pool)
+    const index = renderMarketIndex(state3)
     summary.indexPlugins = index.plugins.length
 
     const indexUrl = `${config.indexBaseUrl.replace(/\/+$/, '')}/index.json`
     validateIndex(index, indexUrl)
 
-    const page = renderBrowsePage(buildBrowseData(state2), { generatedAt: new Date().toISOString() })
+    const page = renderBrowsePage(buildBrowseData(state3), { generatedAt: new Date().toISOString() })
     const files = new Map([
       ['index.json', JSON.stringify(index, null, 2)],
       ['index.html', page],
@@ -295,7 +304,7 @@ async function collectAllSources(http, config, summary) {
       summary.sources.failed.push({ source_id: source.source_id, layer: source.layer, error: result.error })
       summary.errors += 1
     }
-    collected.push({ source, entries: result.entries })
+    collected.push({ source, entries: result.entries, ok: result.ok })
   }
   return collected
 }

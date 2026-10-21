@@ -10,16 +10,20 @@
  * 凭据与本机路径。
  */
 import { log } from './log.mjs'
-import { isValidNpmName, isValidSemver, parseContractId } from './normalize.mjs'
+import { isValidNpmName, isValidSemver, parseContractId, compareSemver } from './normalize.mjs'
 import { syntheticNpmName, syntheticVersion } from './collect.mjs'
 
 const MAX_PUBLISH_TIMESTAMP = 1e11
 
-/** format-1 的本地化文本：字符串或 { en, ... } 映射，必须含 en。 */
-function localized(value) {
-  const text = (value ?? '').toString().trim()
-  if (!text) return undefined
-  return { en: text, zh: text }
+/**
+ * format-1 的本地化文本：{ en, zh }。
+ * 官方校验器要求必须含 en；只有一种语言时两个字段都用它。
+ */
+function localized(descEn, descZh) {
+  const en = String(descEn ?? '').trim()
+  const zh = String(descZh ?? '').trim()
+  if (!en && !zh) return undefined
+  return { en: en || zh, zh: zh || en }
 }
 
 /**
@@ -152,7 +156,7 @@ function buildEntry(plugin, name, { npmBacked, declaredCategories }) {
     }
   }
 
-  versions.sort((a, b) => compareVersionsDesc(a.version, b.version))
+  versions.sort((a, b) => compareSemver(b.version, a.version))
 
   // format-1 要求 versions 非空：没有任何可安装版本的插件不进索引
   if (versions.length === 0) return null
@@ -164,12 +168,12 @@ function buildEntry(plugin, name, { npmBacked, declaredCategories }) {
     metadata.category = plugin.category_id
   }
 
-  const description = plugin.desc_zh || plugin.desc_en || ''
+  const description = localized(plugin.desc_en, plugin.desc_zh)
 
   return {
     name,
     title: plugin.name || name,
-    ...(description ? { description: localized(description) } : {}),
+    ...(description ? { description } : {}),
     repository: { url: plugin.github },
     metadata,
     versions,
@@ -192,11 +196,5 @@ function fallbackTimestamp(plugin) {  const base = plugin.last_push_at ?? plugin
 }
 
 function compareVersionsDesc(a, b) {
-  const pa = String(a).split('-')[0].split('.').map(Number)
-  const pb = String(b).split('-')[0].split('.').map(Number)
-  for (let i = 0; i < 3; i += 1) {
-    const d = (pb[i] ?? 0) - (pa[i] ?? 0)
-    if (d !== 0) return d
-  }
-  return String(b).localeCompare(String(a))
+  return compareSemver(b, a)
 }

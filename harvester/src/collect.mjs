@@ -118,16 +118,23 @@ export async function verifyPlugin(http, config, plugin) {
   try {
     const res = await http.request(`https://api.github.com/repos/${owner}/${repo}`, { redirect: 'manual' })
     if (res.status === 301 || res.status === 302) {
-      // 仓库改名：Location 指向新路径
-      const location = res.headers.get('location') ?? ''
-      const moved = parseGithubUrl(location)
-      if (moved) renamedTo = { owner: moved.owner, repo: moved.repo }
-      // 改名后仍要取新仓库的事实
-      const target = renamedTo
-        ? `https://api.github.com/repos/${renamedTo.owner}/${renamedTo.repo}`
-        : `https://api.github.com/repos/${owner}/${repo}`
-      const follow = await http.request(target)
+      // 仓库改名：GitHub 返回 301。注意 Location 通常是
+      // https://api.github.com/repositories/<数字 id>，不是 owner/repo 形式，
+      // 所以以「跟随重定向后响应里的 full_name」为准，Location 只作兜底。
+      const follow = await http.request(`https://api.github.com/repos/${owner}/${repo}`)
       repoInfo = follow.json
+      const fullName = String(repoInfo?.full_name ?? '')
+      if (fullName.includes('/')) {
+        const [newOwner, newRepo] = fullName.split('/')
+        if (newOwner.toLowerCase() !== owner.toLowerCase() || newRepo.toLowerCase() !== repo.toLowerCase()) {
+          renamedTo = { owner: newOwner, repo: newRepo }
+        }
+      }
+      if (!renamedTo) {
+        const location = res.headers.get('location') ?? ''
+        const moved = parseGithubUrl(location)
+        if (moved) renamedTo = { owner: moved.owner, repo: moved.repo }
+      }
     } else if (res.status === 404) {
       missing = true
     } else {

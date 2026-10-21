@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 归一化：外部条目 → 契约记录模型。
  *
  * 契约 §2：id 为小写规范化 owner/repo，monorepo 子包追加 '#path:/subdir'。
@@ -146,27 +146,30 @@ export function normalizeNpmVersions(versions) {
       const at = a.time ? Date.parse(a.time) : 0
       const bt = b.time ? Date.parse(b.time) : 0
       if (bt !== at) return bt - at
-      return compareSemverDesc(a.ver, b.ver)
+      return compareSemver(b.ver, a.ver)
     })
 }
 
-/** 粗略的 semver 降序比较（只用于排序，不做完整前置规则判定）。 */
-export function compareSemverDesc(a, b) {
+/**
+ * 比较两个版本号：a < b 返回负数，a > b 返回正数（标准比较器口径）。
+ * 只比较主版本号三段，不做完整的前置版本规则判定。
+ */
+export function compareSemver(a, b) {
   const pa = String(a).split('-')[0].split('.').map(Number)
   const pb = String(b).split('-')[0].split('.').map(Number)
   for (let i = 0; i < 3; i += 1) {
-    const d = (pb[i] ?? 0) - (pa[i] ?? 0)
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
     if (d !== 0) return d
   }
-  return String(b).localeCompare(String(a))
+  return 0
 }
 
-/** 取版本时间线的最新版本号（比较用）。 */
+/** 取版本时间线里的最高版本号（比较用，与时间排序无关）。 */
 export function latestVersion(versions) {
   if (!Array.isArray(versions) || versions.length === 0) return null
   return versions
     .slice()
-    .sort((a, b) => compareSemverDesc(a.ver, b.ver))
+    .sort((a, b) => compareSemver(b.ver, a.ver))
     .map((v) => v.ver)[0]
 }
 

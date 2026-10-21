@@ -231,12 +231,32 @@ $env:DATABASE_URL='...'; $env:GITHUB_TOKEN='...'
 把 `npm ci && node src/cli.mjs run` 作为定时流水线步骤，连接串与 token 走
 CI 的环境变量/密钥管理。
 
-## 10. 已知状态
+## 10. 已验证 / 未验证
+
+### 已验证
+
+- **29 项单测通过**（`node --test test/normalize.test.mjs test/sources-render.test.mjs test/degradation.test.mjs`）：
+  归一化与契约 id、入库门槛、信源解析（markdown 清单 / 表格行 / format-1 索引）、
+  索引渲染与官方校验、失败降级规则。
+- **对 6 个真实信源跑通离线全链路**（`node src/cli.mjs collect`）：抓取 → 归一化 →
+  门槛 → 渲染 → 官方 `parseMarketIndex` 自验 → 产出 `dist/index.json` + `dist/index.html`。
+  实测一轮：6 个信源全部成功、0 错误、6847 个去重候选、3484 条进索引，
+  索引内 npm 名 100% 合法且无重名，分类恰好落在契约的 23 个内置分类里。
+- **PG 连通性与 TLS 路径**：47.101.216.5:5432 可达，`sslmode=no-verify` 的 TLS
+  握手成功，服务端确认账号 `dsh_plugin_harvester_rw` 存在（返回
+  `28P01 password authentication failed`）。
+
+### 未验证（需口令 / 需决策）
 
 - **PG 写入路径未端到端跑通**：本机没有 `dsh_plugin_harvester_rw` 的口令
-  （交接说明三：口令走线下渠道，不在任何文档/聊天记录里）。已验证
-  TCP + TLS 握手 + 账号存在（返回 `28P01 password authentication failed`），
-  失败点仅在口令。拿到口令后按第 1 节跑 `run` + `tools/contract-check.mjs` 即可验收。
-- `vbarter-curated` / `vbarter-full` 的 URL 待补（见第 4 节）。
-- 静态托管渠道待落实：默认 `publisher=file` 产出 `dist/`，接 OSS 只需设
-  `HARVESTER_PUBLISHER=oss` 与 OSS 变量；GitHub Pages 用 `file` + 推分支即可。
+  （交接说明三：口令走线下渠道，不在任何文档/聊天记录里）。失败点仅在口令。
+  拿到口令后按第 1 节跑 `run` + `tools/contract-check.mjs` 即可完成验收 T1。
+- **`vbarter-curated` / `vbarter-full` 的 URL 待补**：公开网络上未定位到
+  vbarter 注册表的清单地址（见第 4 节）。拿到地址后填 `config/sources.json`
+  并置 `enabled: true` 即可，无需改代码。
+- **静态托管渠道未实测**：`publisher=file` 已验证（产出 `dist/`）；
+  `publisher=oss` 的代码路径就绪但未连真实 OSS 跑过（需要 Bucket 与 AccessKey）。
+- **L4 核验未连真实 GitHub 跑满批**：核验逻辑与事件判定有单测覆盖，
+  但未用真实 PAT 跑完整批量（需要 `GITHUB_TOKEN`）。
+- **端到端「发现页一键安装」由 Dennis 在本机完成**：本侧只保证 `index.json`
+  通过 `parseMarketIndex`、PG 数据符合契约（交接说明末段）。
